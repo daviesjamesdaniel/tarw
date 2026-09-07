@@ -1002,7 +1002,36 @@ pub fn run() {
             cancel_oauth_login
         ])
         .setup(|app| {
-            accounts::migrate_env_account_if_needed(&app.handle())?;
+            // Populate state.providers (and start watchers/keepalive) before the window/webview
+            // is created, so the frontend's startup commands can never race ahead of this and
+            // hit "No provider config cached for" on an account that hasn't been wired up yet.
+            {
+                let state = app.state::<AppState>();
+                for record in accounts::load(&app.handle())? {
+                    let provider = match record.provider.resolve() {
+                        Ok(p) => p,
+                        Err(err) => {
+                            eprintln!("[startup] skipping {} - {err}", record.email);
+                            continue;
+                        }
+                    };
+                    state
+                        .providers
+                        .lock()
+                        .unwrap()
+                        .insert(record.email.clone(), provider);
+
+                    let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    state
+                        .watcher_stop_flags
+                        .lock()
+                        .unwrap()
+                        .insert(record.email.clone(), stop_flag.clone());
+                    spawn_watcher(app.handle().clone(), record.email.clone(), stop_flag.clone());
+                    spawn_keepalive(app.handle().clone(), record.email, stop_flag);
+                }
+            }
+
             let window = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
@@ -1068,40 +1097,6 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
-
-            {
-                let state = app.state::<AppState>();
-                for record in accounts::load(&app.handle())? {
-                    let provider = match record.provider.resolve() {
-                        Ok(p) => p,
-                        Err(err) => {
-                            eprintln!(
-                                "[startup] skipping {} - {err}",
-                                record.email
-                            );
-                            continue;
-                        }
-                    };
-                    state
-                        .providers
-                        .lock()
-                        .unwrap()
-                        .insert(record.email.clone(), provider);
-
-                    let stop_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-                    state
-                        .watcher_stop_flags
-                        .lock()
-                        .unwrap()
-                        .insert(record.email.clone(), stop_flag.clone());
-                    spawn_watcher(
-                        app.handle().clone(),
-                        record.email.clone(),
-                        stop_flag.clone(),
-                    );
-                    spawn_keepalive(app.handle().clone(), record.email, stop_flag);
-                }
-            }
 
             Ok(())
         })

@@ -341,7 +341,7 @@ function resetToSignedOutState() {
   pinnedListEl.innerHTML = "";
   updatePinnedFolderCount();
   showEmptyReadingPane();
-  statusEl.textContent = "Account removed - use the + in the settings panel to sign in again";
+  statusEl.textContent = "Use the + in the settings panel to add an account";
 }
 
 function buildRow(row, canMove) {
@@ -1289,6 +1289,7 @@ removeAccountFormEl.addEventListener("submit", async (e) => {
   removeAccountConfirmEl.textContent = "Removing…";
   try {
     await invoke("remove_account", { email });
+    await purgeAccountCaches(email);
     closeRemoveAccountModal();
     const remaining = await invoke("list_accounts");
     if (remaining.length === 0) {
@@ -1842,6 +1843,46 @@ function loadPersistedMessageBodyCache() {
   }
 }
 loadPersistedMessageBodyCache();
+
+async function purgeAccountCaches(email) {
+  try {
+    localStorage.removeItem(`allowedRemoteImages:${email}`);
+    localStorage.removeItem(`hiddenMailboxes:${email}`);
+    localStorage.removeItem(`mailboxOrder:${email}`);
+  } catch (err) {
+    console.error("Failed to clear per-account settings after purge", err);
+  }
+  delete mailboxesByAccount[email];
+  try {
+    localStorage.setItem("mailboxesByAccount", JSON.stringify(mailboxesByAccount));
+  } catch (err) {
+    console.error("Failed to persist mailboxesByAccount after purge", err);
+  }
+  const prefix = `${email}::`;
+  for (const key of [...mailboxMessagesCache.keys()]) {
+    if (key.startsWith(prefix)) mailboxMessagesCache.delete(key);
+  }
+  for (const key of [...messageBodyCache.keys()]) {
+    if (key.startsWith(prefix)) messageBodyCache.delete(key);
+  }
+  try {
+    localStorage.setItem("mailboxMessagesCache", JSON.stringify([...mailboxMessagesCache]));
+  } catch (err) {
+    console.error("Failed to persist mailboxMessagesCache after purge", err);
+  }
+  try {
+    const resolved = [];
+    for (const [k, v] of messageBodyCache) {
+      try {
+        resolved.push([k, await v]);
+      } catch {
+      }
+    }
+    localStorage.setItem("messageBodyCache", JSON.stringify(resolved.slice(-MESSAGE_BODY_DISK_CACHE_LIMIT)));
+  } catch (err) {
+    console.error("Failed to persist messageBodyCache after purge", err);
+  }
+}
 
 const VIRTUAL_ROW_HEIGHT_ESTIMATE = 57; 
 const VIRTUAL_BUFFER_ROWS = 8; 
@@ -3711,9 +3752,30 @@ composeSaveDraftEl.addEventListener("click", async () => {
   }
 });
 
+async function purgeOrphanedAccountCaches(registeredEmails) {
+  const registered = new Set(registeredEmails);
+  const seen = new Set();
+  for (const key of mailboxMessagesCache.keys()) {
+    const account = key.split("::")[0];
+    if (account) seen.add(account);
+  }
+  for (const key of messageBodyCache.keys()) {
+    const account = key.split("::")[0];
+    if (account) seen.add(account);
+  }
+  for (const account of Object.keys(mailboxesByAccount)) {
+    seen.add(account);
+  }
+  for (const account of seen) {
+    if (!registered.has(account)) await purgeAccountCaches(account);
+  }
+}
+
 (async () => {
+  let registeredAccounts = [];
   try {
-    const registeredAccounts = await invoke("list_accounts");
+    registeredAccounts = await invoke("list_accounts");
+    await purgeOrphanedAccountCaches(registeredAccounts.map((a) => a.email));
     const savedAccount = localStorage.getItem("activeAccount");
     const stillRegistered = registeredAccounts.some((a) => a.email === savedAccount);
     activeAccount = stillRegistered ? savedAccount : (registeredAccounts[0]?.email ?? "");
@@ -3721,7 +3783,9 @@ composeSaveDraftEl.addEventListener("click", async () => {
     console.error("list_accounts failed", err);
     showErrorToast(`Couldn't load accounts: ${err}`);
   }
-  if (localStorage.getItem("unifiedActive") === "1") {
+  if (registeredAccounts.length === 0) {
+    resetToSignedOutState();
+  } else if (localStorage.getItem("unifiedActive") === "1") {
     activateUnifiedMode();
   } else {
     loadMailboxes();

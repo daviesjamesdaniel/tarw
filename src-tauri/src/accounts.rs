@@ -86,22 +86,3 @@ pub fn remove(app: &tauri::AppHandle, email: &str) -> melib::Result<()> {
     accounts.retain(|a| a.email != email);
     save(app, &accounts)
 }
-
-pub fn migrate_env_account_if_needed(app: &tauri::AppHandle) -> melib::Result<()> {
-    if !load(app)?.is_empty() {
-        return Ok(());
-    }
-    dotenvy::dotenv().ok();
-    if let Ok(user) = std::env::var("IMAP_USER") {
-        if !user.is_empty() {
-            add(
-                app,
-                &user,
-                AccountProvider::Builtin {
-                    id: crate::providers::GMAIL_PROVIDER_ID.to_string(),
-                },
-            )?;
-        }
-    }
-    Ok(())
-}
