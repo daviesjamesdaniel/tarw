@@ -36,13 +36,15 @@ Tarw (Welsh for "bull" — a nod to Tauri/Taurus) is a genuinely beautiful nativ
 - [Node.js](https://nodejs.org/) (for the Tauri CLI)
 - Linux system packages for Tauri v2 + WebKitGTK — see the [Tauri prerequisites guide](https://v2.tauri.app/start/prerequisites/) for your distro (Debian/Ubuntu: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `build-essential`, `curl`, `wget`, `file`, `libxdo-dev`, `libssl-dev`, `libsoup-3.0-dev`, `pkg-config`)
 
-### Setup
+### Build and install
 
 ```sh
 git clone https://github.com/daviesjamesdaniel/tarw.git
 cd tarw
-npm install
+npm install && npm run tauri build
 ```
+
+This produces a `.deb`/AppImage/etc. (depending on your distro) under `src-tauri/target/release/bundle/` — install that, then launch Tarw normally from your desktop's app launcher, like any other installed app.
 
 ### Gmail (OAuth2)
 
@@ -51,16 +53,6 @@ No setup needed — sign in with your Google account when adding the account in-
 ### Other providers (Fastmail, iCloud, self-hosted IMAP)
 
 No extra setup needed — add the account in-app with the email address and an app-specific password generated from that provider's own account settings.
-
-### Running
-
-Build an installable package and install it once, so Tarw shows up in your app launcher like anything else:
-
-```sh
-npm run tauri build
-```
-
-This produces a `.deb`/AppImage/etc. (depending on your distro) under `src-tauri/target/release/bundle/` — install that, then launch Tarw normally from your desktop's app launcher.
 
 ## Status
 
