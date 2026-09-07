@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="icon" type="image/png" href="assets/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tarw</title>
+    <script type="module" src="/main.js" defer></script>
+  </head>
+
+  <body>
+    <main class="shell">
+      <header class="titlebar">
+        <div class="titlebar-left">
+          <button type="button" id="settings-button" class="settings-button" title="Settings" aria-label="Settings"></button>
+          <span id="status">Connecting&hellip;</span>
+        </div>
+        <div class="titlebar-search">
+          <svg class="titlebar-search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="search-input" placeholder="Search all accounts, press Enter&hellip; (from:, has:attachment, is:unread, in:, account:)" autocomplete="off" />
+          <button type="button" id="search-clear" class="titlebar-search-clear" title="Clear search" aria-label="Clear search" hidden>&times;</button>
+        </div>
+        <button type="button" id="compose-button" class="compose-button">Compose</button>
+      </header>
+      <nav id="mailbox-tabs" class="mailbox-tabs"></nav>
+      <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+      <div class="panes">
+        <div id="inbox-list" class="inbox-list">
+          <div id="pinned-folder" class="pinned-folder">
+            <button type="button" id="pinned-folder-toggle" class="pinned-folder-header">
+              <span class="pinned-folder-chevron"></span>
+              <span class="pinned-folder-label">Pinned</span>
+              <span id="pinned-folder-count" class="pinned-folder-count"></span>
+            </button>
+            <ul id="pinned-list" class="pinned-list"></ul>
+          </div>
+          <ul id="regular-list" class="regular-list"></ul>
+        </div>
+        <div id="search-results" class="search-results" hidden>
+          <table class="search-grid">
+            <thead>
+              <tr>
+                <th class="search-grid-status-col"></th>
+                <th data-sort="from">From</th>
+                <th data-sort="subject">Subject</th>
+                <th data-sort="account">Account</th>
+                <th data-sort="mailbox">Mailbox</th>
+                <th data-sort="date">Date</th>
+              </tr>
+            </thead>
+            <tbody id="search-grid-body"></tbody>
+          </table>
+        </div>
+        <div id="reading-pane" class="reading-pane">
+          <div class="reading-pane-empty">
+            <img class="reading-pane-empty-logo" src="assets/empty-state-logo.png" alt="" />
+            <p class="placeholder">Select a message</p>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <ul id="mailbox-context-menu" class="mailbox-context-menu" hidden>
+      <li><button type="button" data-action="new">New folder&hellip;</button></li>
+      <li><button type="button" data-action="mark-all-read">Mark all as read</button></li>
+      <li><button type="button" data-action="empty" class="mailbox-context-menu-danger">Delete all messages&hellip;</button></li>
+      <li><button type="button" data-action="delete">Delete folder</button></li>
+    </ul>
+
+    <div id="empty-mailbox-overlay" class="compose-overlay" hidden>
+      <form id="empty-mailbox-form" class="compose-panel create-mailbox-panel">
+        <div class="compose-header">
+          <span id="empty-mailbox-title">Delete all messages</span>
+          <button type="button" id="empty-mailbox-close" class="compose-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="delete-mailbox-body">
+          <p id="empty-mailbox-summary"></p>
+        </div>
+        <div class="compose-footer">
+          <span id="empty-mailbox-error" class="compose-error"></span>
+          <button type="button" id="empty-mailbox-cancel" class="compose-secondary">Cancel</button>
+          <button type="submit" id="empty-mailbox-confirm" class="compose-send compose-send-danger">
+            Delete all messages
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div id="delete-mailbox-overlay" class="compose-overlay" hidden>
+      <form id="delete-mailbox-form" class="compose-panel create-mailbox-panel">
+        <div class="compose-header">
+          <span>Delete folder</span>
+          <button type="button" id="delete-mailbox-close" class="compose-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="delete-mailbox-body">
+          <p id="delete-mailbox-summary"></p>
+          <p id="delete-mailbox-subfolders" hidden></p>
+          <label class="delete-mailbox-option">
+            <input type="radio" name="delete-mailbox-policy" value="move_to_parent" checked />
+            <span id="delete-mailbox-move-label">Move messages to Inbox</span>
+          </label>
+          <label class="delete-mailbox-option">
+            <input type="radio" name="delete-mailbox-policy" value="move_to_trash" />
+            <span>Delete messages (move to Bin)</span>
+          </label>
+        </div>
+        <div class="compose-footer">
+          <span id="delete-mailbox-error" class="compose-error"></span>
+          <button type="button" id="delete-mailbox-cancel" class="compose-secondary">Cancel</button>
+          <button type="submit" id="delete-mailbox-confirm" class="compose-send compose-send-danger">Delete folder</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="forward-attachments-overlay" class="compose-overlay" hidden>
+      <div class="compose-panel create-mailbox-panel">
+        <div class="compose-header">
+          <span>Include attachments?</span>
+          <button type="button" id="forward-attachments-close" class="compose-close" aria-label="Close">&times;</button>
+        </div>
+        <p id="forward-attachments-summary" class="forward-attachments-summary"></p>
+        <div class="compose-footer">
+          <button type="button" id="forward-attachments-skip" class="compose-secondary">Skip</button>
+          <button type="button" id="forward-attachments-include" class="compose-send">Include</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="remove-account-overlay" class="compose-overlay" hidden>
+      <form id="remove-account-form" class="compose-panel create-mailbox-panel">
+        <div class="compose-header">
+          <span>Remove account</span>
+          <button type="button" id="remove-account-close" class="compose-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="delete-mailbox-body">
+          <p>This removes the stored sign-in for <strong id="remove-account-target"></strong> and clears its local message cache on this device.<br />It doesn't delete anything from the server.</p>
+        </div>
+        <div class="compose-footer">
+          <span id="remove-account-error" class="compose-error"></span>
+          <button type="button" id="remove-account-cancel" class="compose-secondary">Cancel</button>
+          <button type="submit" id="remove-account-confirm" class="compose-send compose-send-danger">
+            Remove account
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div id="add-account-overlay" class="compose-overlay" hidden>
+      <form id="add-account-form" class="compose-panel create-mailbox-panel">
+        <div class="compose-header">
+          <span>Add account</span>
+          <button type="button" id="add-account-close" class="compose-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="compose-field">
+          <label for="add-account-email">Email address</label>
+          <input type="email" id="add-account-email" required autocomplete="off" />
+        </div>
+        <div id="add-account-manual-host-fields" hidden>
+          <div class="compose-field">
+            <label for="add-account-imap-host">IMAP host</label>
+            <input type="text" id="add-account-imap-host" autocomplete="off" />
+          </div>
+          <div class="compose-field">
+            <label for="add-account-imap-port">IMAP port</label>
+            <input type="number" id="add-account-imap-port" value="993" />
+          </div>
+          <div class="compose-field">
+            <label for="add-account-smtp-host">SMTP host</label>
+            <input type="text" id="add-account-smtp-host" autocomplete="off" />
+          </div>
+          <div class="compose-field">
+            <label for="add-account-smtp-port">SMTP port</label>
+            <input type="number" id="add-account-smtp-port" value="587" />
+          </div>
+        </div>
+        <div class="compose-field" id="add-account-password-field" hidden>
+          <label for="add-account-password">Password</label>
+          <input type="password" id="add-account-password" autocomplete="off" />
+        </div>
+        <div id="add-account-status" class="add-account-status" hidden>
+          <span class="add-account-spinner" aria-hidden="true"></span>
+          <span id="add-account-status-text"></span>
+        </div>
+        <div class="compose-footer">
+          <span id="add-account-error" class="compose-error"></span>
+          <button type="button" id="add-account-cancel" class="compose-secondary">Cancel</button>
+          <button type="submit" id="add-account-send" class="compose-send">Sign in</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="create-mailbox-overlay" class="compose-overlay" hidden>
+      <form id="create-mailbox-form" class="compose-panel create-mailbox-panel">
+        <div class="compose-header">
+          <span id="create-mailbox-title">New folder</span>
+          <button type="button" id="create-mailbox-close" class="compose-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="compose-field">
+          <label for="create-mailbox-name">Name</label>
+          <input type="text" id="create-mailbox-name" required autocomplete="off" />
+        </div>
+        <div class="compose-footer">
+          <span id="create-mailbox-error" class="compose-error"></span>
+          <button type="button" id="create-mailbox-cancel" class="compose-secondary">Cancel</button>
+          <button type="submit" id="create-mailbox-send" class="compose-send">Create</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="compose-overlay" class="compose-overlay" hidden>
+      <form id="compose-form" class="compose-panel">
+        <div class="compose-header">
+          <span>New message</span>
+          <button type="button" id="compose-close" class="compose-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="compose-field" id="compose-account-field" hidden>
+          <label for="compose-account">From</label>
+          <select id="compose-account"></select>
+        </div>
+        <div class="compose-field compose-field-recipient">
+          <label for="compose-to">To</label>
+          <input type="text" id="compose-to" required autocomplete="off" />
+          <div class="recipient-suggestions" id="compose-to-suggestions" hidden></div>
+          <div class="compose-cc-bcc-toggles">
+            <button type="button" id="compose-show-cc" class="compose-field-toggle">Cc</button>
+            <button type="button" id="compose-show-bcc" class="compose-field-toggle">Bcc</button>
+          </div>
+        </div>
+        <div class="compose-field compose-field-recipient" id="compose-cc-field" hidden>
+          <label for="compose-cc">Cc</label>
+          <input type="text" id="compose-cc" autocomplete="off" />
+          <div class="recipient-suggestions" id="compose-cc-suggestions" hidden></div>
+        </div>
+        <div class="compose-field compose-field-recipient" id="compose-bcc-field" hidden>
+          <label for="compose-bcc">Bcc</label>
+          <input type="text" id="compose-bcc" autocomplete="off" />
+          <div class="recipient-suggestions" id="compose-bcc-suggestions" hidden></div>
+        </div>
+        <div class="compose-field">
+          <label for="compose-subject">Subject</label>
+          <input type="text" id="compose-subject" autocomplete="off" />
+        </div>
+        <div class="compose-toolbar" id="compose-toolbar">
+          <button type="button" class="compose-tool" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+          <button type="button" class="compose-tool" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+          <button type="button" class="compose-tool" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+          <span class="compose-tool-sep"></span>
+          <button type="button" class="compose-tool" data-cmd="insertUnorderedList" title="Bulleted list"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="6" r="1"/><line x1="9" y1="6" x2="20" y2="6"/><circle cx="4" cy="12" r="1"/><line x1="9" y1="12" x2="20" y2="12"/><circle cx="4" cy="18" r="1"/><line x1="9" y1="18" x2="20" y2="18"/></svg></button>
+          <button type="button" class="compose-tool" data-cmd="insertOrderedList" title="Numbered list"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><text x="1.5" y="8.5" font-size="7" stroke="none" fill="currentColor" font-family="sans-serif">1</text><line x1="9" y1="6" x2="20" y2="6"/><text x="1.5" y="14.5" font-size="7" stroke="none" fill="currentColor" font-family="sans-serif">2</text><line x1="9" y1="12" x2="20" y2="12"/><text x="1.5" y="20.5" font-size="7" stroke="none" fill="currentColor" font-family="sans-serif">3</text><line x1="9" y1="18" x2="20" y2="18"/></svg></button>
+          <button type="button" class="compose-tool" id="compose-link-button" title="Insert link">&#128279;</button>
+          <span class="compose-tool-sep"></span>
+          <label class="compose-color-tool" title="Text colour">
+            <span class="compose-color-icon">A</span>
+            <input type="color" id="compose-text-color" value="#1a1a1a" />
+          </label>
+          <label class="compose-color-tool" title="Highlight">
+            <span class="compose-color-icon compose-highlight-icon">A</span>
+            <input type="color" id="compose-highlight-color" value="#fff176" />
+          </label>
+        </div>
+        <div id="compose-attachments-bar" class="attachment-bar" hidden></div>
+        <iframe
+          id="compose-body"
+          class="compose-body"
+          title="Message body"
+          sandbox="allow-same-origin"
+        ></iframe>
+        <div class="compose-footer">
+          <span id="compose-error" class="compose-error"></span>
+          <button type="button" id="compose-cancel" class="compose-secondary">Cancel</button>
+          <button type="button" id="compose-save-draft" class="compose-secondary">Save draft</button>
+          <button type="submit" id="compose-send" class="compose-send">Send</button>
+        </div>
+      </form>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,63 @@
+[package]
+name = "tarw"
+version = "0.1.0"
+description = "A native Linux email client (Tauri + Rust IMAP backend)"
+authors = ["Dan Davies"]
+edition = "2021"
+license = "GPL-3.0-or-later"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "tarw_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dotenvy = "0.15.7"
+melib = { version = "0.8.13", features = ["sqlite3"] }
+indexmap = "2"
+# Same version melib itself depends on - used to compute the exact path to
+# melib's own on-disk mailbox/message cache (see imap_client::remove_account_data),
+# rather than re-deriving XDG path logic by hand and risking it drifting
+# from melib's actual behaviour.
+xdg = "2"
+
+# melib 0.8.13 requires imap-codec "2.0.0-alpha.4" (imap-types alpha.3), but
+# cargo's default resolver picks the newest matching pre-release available on
+# crates.io, which added breaking changes melib doesn't build against.
+# Pinned to the versions melib was actually published against - same pin used
+# in the Qt version of this project (crates/app, crates/mail-spike there).
+imap-codec = "=2.0.0-alpha.4"
+imap-types = "=2.0.0-alpha.3"
+oauth2 = { version = "5.0.0", features = ["reqwest-blocking"] }
+keyring = { version = "4.1.6", features = ["v1", "dbus-secret-service-keyring-store"] }
+base64 = "0.23.1"
+tauri-plugin-dialog = "2.7.2"
+tauri-plugin-notification = "2"
+# Used directly (alongside the plugin above) only for the new-mail
+# notification, whose click-to-open behaviour needs the action-wait
+# handle tauri-plugin-notification's own `.show()` doesn't expose (checked
+# its source - it fires-and-forgets, no way to learn a notification was
+# clicked). Pinned to the exact version tauri-plugin-notification already
+# pulls in (see Cargo.lock) so both use the same build, not two copies.
+notify-rust = "=4.18.0"
+
+# Same vendored, patched melib as the Qt version of this project
+# (~/Projects/linux-email-client/vendor/melib-0.8.13) - six local fixes on
+# top of 0.8.13, five already submitted upstream as PRs #43-#47
+# (meli/meli), one (mailbox-list caching) still in progress separately.
+# Copied rather than a path dependency across the two repos, since they're
+# deliberately independent projects being compared side by side.
+[patch.crates-io]
+melib = { path = "../vendor/melib-0.8.13" }
+
