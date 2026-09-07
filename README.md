@@ -28,6 +28,37 @@ Tarw (Welsh for "bull" — a nod to Tauri/Taurus) is a genuinely beautiful nativ
 - HTML email rendering (sandboxed iframe, remote-image opt-in), attachment view/download
 - Real-time push via IMAP IDLE, desktop notifications, minimise-to-tray
 
+## Getting started
+
+### Prerequisites
+
+- [Rust](https://www.rust-lang.org/tools/install) (stable toolchain)
+- [Node.js](https://nodejs.org/) (for the Tauri CLI)
+- Linux system packages for Tauri v2 + WebKitGTK — see the [Tauri prerequisites guide](https://v2.tauri.app/start/prerequisites/) for your distro (Debian/Ubuntu: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `build-essential`, `curl`, `wget`, `file`, `libxdo-dev`, `libssl-dev`, `libsoup-3.0-dev`, `pkg-config`)
+
+### Setup
+
+```sh
+git clone https://github.com/daviesjamesdaniel/tarw.git
+cd tarw
+npm install
+```
+
+### Gmail (OAuth2)
+
+No setup needed — sign in with your Google account when adding the account in-app. Tarw ships with its own OAuth client, so there's no Google Cloud Console setup required. Since that client isn't verified by Google (a paid review process not worth it for a small FOSS project), you'll see an "unverified app" warning during sign-in — click **Advanced → Go to Tarw (unsafe)** to continue. See [PRIVACY.md](PRIVACY.md) for what the app actually does with your data.
+
+### Other providers (Fastmail, iCloud, self-hosted IMAP)
+
+No extra setup needed — add the account in-app with the email address and an app-specific password generated from that provider's own account settings.
+
+### Running
+
+```sh
+npm run tauri dev    # development, with hot reload
+npm run tauri build  # release build
+```
+
 ## Status
 
 Actively developed.

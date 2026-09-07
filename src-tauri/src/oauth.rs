@@ -36,15 +36,6 @@ fn err(msg: impl Into<String>) -> melib::error::Error {
     melib::error::Error::new(msg.into())
 }
 
-fn oauth_client_credentials(cfg: &OAuthProviderConfig) -> melib::Result<(String, String)> {
-    dotenvy::dotenv().ok();
-    let id = std::env::var(&cfg.client_id_env)
-        .map_err(|_| err(format!("{} not set - see src-tauri/.env", cfg.client_id_env)))?;
-    let secret = std::env::var(&cfg.client_secret_env)
-        .map_err(|_| err(format!("{} not set - see src-tauri/.env", cfg.client_secret_env)))?;
-    Ok((id, secret))
-}
-
 fn http_client() -> melib::Result<reqwest::blocking::Client> {
     reqwest::blocking::ClientBuilder::new()
         // Never follow redirects on a token/auth exchange - a malicious/compromised auth server
@@ -75,7 +66,7 @@ fn try_refresh(email: &str, cfg: &OAuthProviderConfig) -> melib::Result<Option<S
         Err(e) => return Err(err(format!("Could not read stored refresh token: {e}"))),
     };
 
-    let (client_id, client_secret) = oauth_client_credentials(cfg)?;
+    let (client_id, client_secret) = (cfg.client_id.clone(), cfg.client_secret.clone());
     let client = BasicClient::new(ClientId::new(client_id))
         .set_client_secret(ClientSecret::new(client_secret))
         .set_token_uri(
@@ -103,7 +94,7 @@ fn interactive_login(email: &str, cfg: &OAuthProviderConfig) -> melib::Result<St
         .insert(email.to_string(), cancel_flag.clone());
     let _guard = PendingLoginGuard(email.to_string());
 
-    let (client_id, client_secret) = oauth_client_credentials(cfg)?;
+    let (client_id, client_secret) = (cfg.client_id.clone(), cfg.client_secret.clone());
 
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| {
         err(format!(

@@ -33,11 +33,20 @@ pub struct OAuthProviderConfig {
     pub auth_url: String,
     pub token_url: String,
     pub scope: String,
-    pub client_id_env: String,
-    pub client_secret_env: String,
+    pub client_id: String,
+    pub client_secret: String,
 }
 
 pub const GMAIL_PROVIDER_ID: &str = "gmail";
+
+// This "Desktop app" OAuth client belongs to the Tarw project itself, so every install can sign
+// in to Gmail without each user having to register their own Google Cloud OAuth client. The
+// secret below isn't actually confidential for this client type - Google's own OAuth docs treat
+// installed-app client secrets as non-secret, since an installed app can't keep one anyway - so
+// this being visible in a public repo is expected, not a leaked credential.
+const GOOGLE_OAUTH_CLIENT_ID: &str =
+    "390467409611-3h1o42vtndeqafvvjmm89j6ujsemiuuv.apps.googleusercontent.com";
+const GOOGLE_OAUTH_CLIENT_SECRET: &str = "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";
 
 fn builtin_providers() -> Vec<ProviderConfig> {
     vec![
@@ -55,8 +64,8 @@ fn builtin_providers() -> Vec<ProviderConfig> {
                 auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
                 token_url: "https://oauth2.googleapis.com/token".to_string(),
                 scope: "https://mail.google.com/".to_string(),
-                client_id_env: "GOOGLE_OAUTH_CLIENT_ID".to_string(),
-                client_secret_env: "GOOGLE_OAUTH_CLIENT_SECRET".to_string(),
+                client_id: GOOGLE_OAUTH_CLIENT_ID.to_string(),
+                client_secret: GOOGLE_OAUTH_CLIENT_SECRET.to_string(),
             }),
         },
         ProviderConfig {
