@@ -54,10 +54,13 @@ No extra setup needed — add the account in-app with the email address and an a
 
 ### Running
 
+Build an installable package and install it once, so Tarw shows up in your app launcher like anything else:
+
 ```sh
-npm run tauri dev    # development, with hot reload
-npm run tauri build  # release build
+npm run tauri build
 ```
+
+This produces a `.deb`/AppImage/etc. (depending on your distro) under `src-tauri/target/release/bundle/` — install that, then launch Tarw normally from your desktop's app launcher.
 
 ## Status
 
