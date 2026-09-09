@@ -2041,9 +2041,9 @@ dependencies = [
 
 [[package]]
 name = "imap-codec"
-version = "2.0.0-alpha.4"
+version = "2.0.0-alpha.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "204c4816456f1a732d55bb42d90bac69538588dcdf3ef8c9a90b5ca02397021a"
+checksum = "d4087870a6597c456aa5860034b92139609b0e4a4102bc9f5c8c69343c341d0b"
 dependencies = [
  "abnf-core",
  "base64 0.22.1",
@@ -2055,15 +2055,15 @@ dependencies = [
 
 [[package]]
 name = "imap-types"
-version = "2.0.0-alpha.3"
+version = "2.0.0-alpha.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20a1a5a918696bcc51132d4b96f9dd872517e70fcb7a7b8082f0edcd83a84eeb"
+checksum = "e31d8480b20e8416d52f20b737a159bd925219273aedb023caa12190ca42781c"
 dependencies = [
  "base64 0.22.1",
  "bounded-static",
  "bounded-static-derive",
  "chrono",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2506,6 +2506,7 @@ dependencies = [
 [[package]]
 name = "melib"
 version = "0.8.13"
+source = "git+https://github.com/daviesjamesdaniel/melib-tarw-patches.git?rev=225fddc318f473996b4b71187577eaa77447273e#225fddc318f473996b4b71187577eaa77447273e"
 dependencies = [
  "async-fn-stream",
  "async-io",
@@ -2518,6 +2519,7 @@ dependencies = [
  "flate2",
  "futures",
  "imap-codec",
+ "imap-types",
  "indexmap 2.14.0",
  "libc",
  "libloading 0.8.9",
