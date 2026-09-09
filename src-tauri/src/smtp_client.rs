@@ -131,17 +131,15 @@ pub fn send(
         AuthMethod::OAuth2 => {
             let secret = crate::oauth::get_xoauth2_password(account, provider)?;
             SmtpAuth::XOAuth2 {
-                // melib expects a shell command that prints the token, not the token itself -
-                // this just echoes back the secret we already have.
-                token_command: format!("printf '%s' '{secret}'"),
+                token: melib::conf::Secret::Value(secret),
                 require_auth: true,
             }
         }
         AuthMethod::Password => {
             let secret = crate::password_auth::get_password(account)?;
             SmtpAuth::Auto {
-                username: account.to_string(),
-                password: melib::smtp::Password::Raw(secret),
+                username: melib::conf::Secret::Value(account.to_string()),
+                password: melib::conf::Secret::Value(secret),
                 require_auth: true,
                 auth_type: Default::default(),
             }
@@ -149,7 +147,7 @@ pub fn send(
     };
 
     let server_conf = SmtpServerConf {
-        hostname: provider.smtp_host.clone(),
+        hostname: melib::conf::Secret::Value(provider.smtp_host.clone()),
         port: provider.smtp_port,
         envelope_from: account.to_string(),
         auth,

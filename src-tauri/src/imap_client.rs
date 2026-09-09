@@ -89,7 +89,6 @@ fn connect_inner(
         extra_identities: vec![],
         read_only: false,
         display_name: None,
-        order: Default::default(),
         subscribed_mailboxes: vec![],
         mailboxes: indexmap::indexmap! {},
         manual_refresh: false,
@@ -111,7 +110,7 @@ fn connect_inner(
     // No-op: this connection is a one-shot login + mailbox-list check, not the long-lived
     // watch_stream connection elsewhere that actually processes events.
     let event_consumer = BackendEventConsumer::new(Arc::new(|_account_hash, _event| {}));
-    let imap = ImapType::new(&account_conf, Default::default(), event_consumer)?;
+    let mut imap = ImapType::new(&account_conf, Default::default(), event_consumer)?;
 
     let online_future = imap
         .is_online()
@@ -175,7 +174,7 @@ pub fn envelope_row(e: &Envelope) -> EnvelopeRow {
             .first()
             .map(|a| a.display_name().to_string())
             .unwrap_or_else(|| "(unknown sender)".to_string()),
-        from_address: e.from().first().map(|a| a.get_email()).unwrap_or_default(),
+        from_address: e.from().first().map(|a| a.get_email().to_string()).unwrap_or_default(),
         to: format_address_list(e.to()),
         cc: format_address_list(e.cc()),
         date: e.date(),
@@ -232,12 +231,12 @@ fn mailbox_infos(mailboxes: &HashMap<MailboxHash, Mailbox>) -> Vec<MailboxInfo> 
     infos.into_iter().map(|(_, info)| info).collect()
 }
 
-pub fn list_mailboxes(imap: &ImapType) -> melib::Result<Vec<MailboxInfo>> {
+pub fn list_mailboxes(imap: &mut ImapType) -> melib::Result<Vec<MailboxInfo>> {
     let mailboxes = block_on(imap.mailboxes()?)?;
     Ok(mailbox_infos(&mailboxes))
 }
 
-pub fn refresh_mailboxes(imap: &ImapType) -> melib::Result<Vec<MailboxInfo>> {
+pub fn refresh_mailboxes(imap: &mut ImapType) -> melib::Result<Vec<MailboxInfo>> {
     // Reaches into melib's internal cache directly (no public API for this) to force the
     // following list_mailboxes() to refetch from the server instead of returning stale data.
     block_on(imap.uid_store.mailboxes.lock()).clear();
@@ -344,7 +343,7 @@ pub fn delete_mailbox(
     Ok(mailbox_infos(&mailboxes))
 }
 
-pub fn watch_stream(imap: &ImapType) -> ResultStream<BackendEvent> {
+pub fn watch_stream(imap: &mut ImapType) -> ResultStream<BackendEvent> {
     imap.watch()
 }
 
@@ -355,7 +354,7 @@ pub fn watch_inbox_for_new_mail(
     on_mailbox_changed: impl Fn(),
 ) -> melib::Result<()> {
     let mut imap = connect(email, provider)?;
-    let inbox_hash = list_mailboxes(&imap)?
+    let inbox_hash = list_mailboxes(&mut imap)?
         .into_iter()
         .find(|m| m.special_usage == "Inbox")
         .map(|m| m.hash)
@@ -365,7 +364,7 @@ pub fn watch_inbox_for_new_mail(
         .map(|row| row.hash)
         .collect();
 
-    let mut stream = watch_stream(&imap)?;
+    let mut stream = watch_stream(&mut imap)?;
     while let Some(event) = block_on(stream.next()) {
         let refresh_events = match event? {
             BackendEvent::Refresh(e) => vec![e],
@@ -464,7 +463,7 @@ fn attachment_infos(body: &melib::email::Attachment) -> Vec<AttachmentInfo> {
         .collect()
 }
 
-pub fn fetch_body(imap: &ImapType, hash: melib::email::EnvelopeHash) -> melib::Result<BodyResult> {
+pub fn fetch_body(imap: &mut ImapType, hash: melib::email::EnvelopeHash) -> melib::Result<BodyResult> {
     let bytes = block_on(imap.envelope_bytes_by_hash(hash)?)?;
     let envelope = Envelope::from_bytes(&bytes, None)?;
     let attachment = envelope.body_bytes(&bytes);
@@ -517,7 +516,7 @@ pub fn fetch_body(imap: &ImapType, hash: melib::email::EnvelopeHash) -> melib::R
 }
 
 pub fn fetch_attachment(
-    imap: &ImapType,
+    imap: &mut ImapType,
     hash: melib::email::EnvelopeHash,
     index: usize,
 ) -> melib::Result<(String, String, Vec<u8>)> {
