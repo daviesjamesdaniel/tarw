@@ -23,7 +23,14 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-melib = { version = "0.8.13", features = ["sqlite3"] }
+# melib as a git dependency rather than a vendored copy - melib hasn't
+# published a crates.io release since 0.8.13 despite months of merged
+# upstream fixes, so this tracks a real commit directly. Pinned to a fork
+# (daviesjamesdaniel/melib-tarw-patches) carrying only the handful of fixes
+# not yet merged into melib's actual master - each one gets dropped from
+# that fork as it lands upstream for real, so this fork is meant to shrink
+# to nothing over time, not grow. See its README for what's on top and why.
+melib = { git = "https://github.com/daviesjamesdaniel/melib-tarw-patches.git", rev = "225fddc318f473996b4b71187577eaa77447273e", features = ["sqlite3"] }
 indexmap = "2"
 # Same version melib itself depends on - used to compute the exact path to
 # melib's own on-disk mailbox/message cache (see imap_client::remove_account_data),
@@ -31,13 +38,11 @@ indexmap = "2"
 # from melib's actual behaviour.
 xdg = "2"
 
-# melib 0.8.13 requires imap-codec "2.0.0-alpha.4" (imap-types alpha.3), but
-# cargo's default resolver picks the newest matching pre-release available on
-# crates.io, which added breaking changes melib doesn't build against.
-# Pinned to the versions melib was actually published against - same pin used
-# in the Qt version of this project (crates/app, crates/mail-spike there).
-imap-codec = "=2.0.0-alpha.4"
-imap-types = "=2.0.0-alpha.3"
+# Pinned to the exact versions the melib fork above requires - cargo's
+# default resolver otherwise picks the newest matching pre-release on
+# crates.io, which can add breaking changes melib doesn't build against.
+imap-codec = "=2.0.0-alpha.6"
+imap-types = "=2.0.0-alpha.6"
 oauth2 = { version = "5.0.0", features = ["reqwest-blocking"] }
 keyring = { version = "4.1.6", features = ["v1", "dbus-secret-service-keyring-store"] }
 base64 = "0.23.1"
@@ -50,13 +55,4 @@ tauri-plugin-notification = "2"
 # clicked). Pinned to the exact version tauri-plugin-notification already
 # pulls in (see Cargo.lock) so both use the same build, not two copies.
 notify-rust = "=4.18.0"
-
-# Same vendored, patched melib as the Qt version of this project
-# (~/Projects/linux-email-client/vendor/melib-0.8.13) - six local fixes on
-# top of 0.8.13, five already submitted upstream as PRs #43-#47
-# (meli/meli), one (mailbox-list caching) still in progress separately.
-# Copied rather than a path dependency across the two repos, since they're
-# deliberately independent projects being compared side by side.
-[patch.crates-io]
-melib = { path = "../vendor/melib-0.8.13" }
 
