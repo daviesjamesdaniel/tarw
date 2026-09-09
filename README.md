@@ -46,6 +46,15 @@ npm install && npm run tauri build
 
 This produces a `.deb`/AppImage/etc. (depending on your distro) under `src-tauri/target/release/bundle/` — install that, then launch Tarw normally from your desktop's app launcher, like any other installed app.
 
+#### Arch / CachyOS
+
+Not on the AUR yet (registration is currently closed) — build directly from the cloned repo instead:
+
+```sh
+cd tarw/packaging/arch
+makepkg -si
+```
+
 ### Gmail (OAuth2)
 
 No setup needed — sign in with your Google account when adding the account in-app. Tarw ships with its own OAuth client, so there's no Google Cloud Console setup required. Since that client isn't verified by Google (a paid review process not worth it for a small FOSS project), you'll see an "unverified app" warning during sign-in — click **Advanced → Go to Tarw (unsafe)** to continue. See [PRIVACY.md](PRIVACY.md) for what the app actually does with your data.
@@ -58,7 +67,7 @@ No extra setup needed — add the account in-app with the email address and an a
 
 Actively developed.
 
-Not yet packaged for distribution.
+Packaged for Arch/CachyOS (see above); other distros build via `npm run tauri build`. Not yet on any distro's official repos or the AUR.
 
 ## License
 
