@@ -1,4 +1,3 @@
 # TODO
 
-- Account management settings screen.
-- Support for multiple accounts, with unified mailboxes (e.g. a combined inbox across accounts).
+- Account editing in the settings screen (currently a placeholder — add/remove already work).
