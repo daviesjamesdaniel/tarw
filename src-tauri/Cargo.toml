@@ -56,3 +56,36 @@ tauri-plugin-notification = "2"
 # pulls in (see Cargo.lock) so both use the same build, not two copies.
 notify-rust = "=4.18.0"
 
+# cargo-deb reads this directly to produce packaging/deb's .deb - see that
+# directory's README for the build command. Runtime deps mirror
+# packaging/arch/PKGBUILD's depends=() array, translated to Debian names.
+[package.metadata.deb]
+name = "tarw"
+maintainer = "Dan Davies <davies.james.daniel@gmail.com>"
+copyright = "2026, Dan Davies"
+license-file = ["../LICENSE", "0"]
+extended-description = "A FOSS, native Linux email client - Wayland-first, built on real IMAP/SMTP infrastructure."
+depends = "libwebkit2gtk-4.1-0, libgtk-3-0, libayatana-appindicator3-1, librsvg2-2"
+section = "mail"
+priority = "optional"
+assets = [
+    ["target/release/tarw", "usr/bin/tarw", "755"],
+    ["icons/128x128.png", "usr/share/icons/hicolor/128x128/apps/dan.tarw.png", "644"],
+    ["../packaging/deb/dan.tarw.desktop", "usr/share/applications/dan.tarw.desktop", "644"],
+]
+
+# cargo-generate-rpm reads this for packaging/rpm's .rpm - runtime deps
+# translated to Fedora/openSUSE names, same source list as the .deb above.
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/tarw", dest = "/usr/bin/tarw", mode = "755" },
+    { source = "icons/128x128.png", dest = "/usr/share/icons/hicolor/128x128/apps/dan.tarw.png", mode = "644" },
+    { source = "../packaging/rpm/dan.tarw.desktop", dest = "/usr/share/applications/dan.tarw.desktop", mode = "644" },
+]
+
+[package.metadata.generate-rpm.requires]
+"webkit2gtk4.1" = "*"
+gtk3 = "*"
+libappindicator-gtk3 = "*"
+librsvg2 = "*"
+

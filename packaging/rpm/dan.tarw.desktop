@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Tarw
+Comment=A FOSS, native Linux email client - Wayland-first, built on real IMAP/SMTP infrastructure
+Exec=tarw
+Icon=dan.tarw
+Terminal=false
+Categories=Network;Email;

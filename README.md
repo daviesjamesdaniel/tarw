@@ -55,6 +55,29 @@ cd tarw/packaging/arch
 makepkg -si
 ```
 
+#### Debian / Ubuntu
+
+Not in any repository yet — build a `.deb` directly from the cloned repo (see [packaging/deb](packaging/deb) for details):
+
+```sh
+cargo install cargo-deb --locked
+cd tarw/src-tauri
+cargo deb --locked
+sudo apt install ./target/debian/tarw_*.deb
+```
+
+#### Fedora / openSUSE
+
+Not in any repository yet — build a `.rpm` directly from the cloned repo (see [packaging/rpm](packaging/rpm) for details):
+
+```sh
+cargo install cargo-generate-rpm --locked
+cd tarw/src-tauri
+cargo build --release --locked
+cargo generate-rpm
+sudo dnf install ./target/generate-rpm/tarw-*.rpm
+```
+
 ### Gmail (OAuth2)
 
 No setup needed — sign in with your Google account when adding the account in-app. Tarw ships with its own OAuth client, so there's no Google Cloud Console setup required. Since that client isn't verified by Google (a paid review process not worth it for a small FOSS project), you'll see an "unverified app" warning during sign-in — click **Advanced → Go to Tarw (unsafe)** to continue. See [PRIVACY.md](PRIVACY.md) for what the app actually does with your data.
@@ -67,7 +90,7 @@ No extra setup needed — add the account in-app with the email address and an a
 
 Actively developed.
 
-Packaged for Arch/CachyOS (see above); other distros build via `npm run tauri build`. Not yet on any distro's official repos or the AUR.
+Packaged for Arch/CachyOS, Debian/Ubuntu, and Fedora/openSUSE (see above); other distros build via `npm run tauri build`. Not yet on any distro's official repos or the AUR.
 
 ## License
 
