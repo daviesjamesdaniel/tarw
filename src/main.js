@@ -131,6 +131,24 @@ let searchSort = { column: "date", dir: "desc" };
 let searchRenderFrameRequested = false;
 let searchRenderPending = null;
 
+// Quick filters (mailbox list only, not the cross-account search grid,
+// which already has its own is:unread/has:attachment operators). Session-only
+// on purpose - simpler than a persisted per-mailbox setting, and these are
+// meant to be quick toggles rather than durable view state.
+let filterUnreadOnly = false;
+let filterAttachmentOnly = false;
+let lastMailboxRows = null;
+let lastUnifiedRows = null;
+
+function applyQuickFilters(rows) {
+  if (!filterUnreadOnly && !filterAttachmentOnly) return rows;
+  return rows.filter((row) => {
+    if (filterUnreadOnly && row.is_seen) return false;
+    if (filterAttachmentOnly && !row.has_attachments) return false;
+    return true;
+  });
+}
+
 function scheduleSearchRender(render) {
   searchRenderPending = render;
   if (searchRenderFrameRequested) return;
@@ -165,6 +183,32 @@ function accountColor(account) {
 
 document.getElementById("pinned-folder-toggle").addEventListener("click", () => {
   pinnedFolderEl.classList.toggle("expanded");
+});
+
+// Re-renders from whichever rows were last fetched (mailbox or unified view)
+// rather than re-fetching - toggling a quick filter is purely a display
+// concern, the underlying data hasn't changed.
+function rerenderCurrentMailboxView() {
+  if (unifiedActive) {
+    if (lastUnifiedRows) renderUnifiedRows(lastUnifiedRows);
+  } else if (lastMailboxRows) {
+    renderMessageRows(lastMailboxRows);
+  }
+}
+
+const quickFilterUnreadEl = document.getElementById("quick-filter-unread");
+const quickFilterAttachmentEl = document.getElementById("quick-filter-attachment");
+
+quickFilterUnreadEl.addEventListener("click", () => {
+  filterUnreadOnly = !filterUnreadOnly;
+  quickFilterUnreadEl.setAttribute("aria-pressed", String(filterUnreadOnly));
+  rerenderCurrentMailboxView();
+});
+
+quickFilterAttachmentEl.addEventListener("click", () => {
+  filterAttachmentOnly = !filterAttachmentOnly;
+  quickFilterAttachmentEl.setAttribute("aria-pressed", String(filterAttachmentOnly));
+  rerenderCurrentMailboxView();
 });
 
 document.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -2026,10 +2070,13 @@ function findOrScrollToRow(hash) {
 }
 
 function renderMessageRows(rows) {
+  lastMailboxRows = rows;
   for (const row of rows) {
     row.account = activeAccount;
     row.mailboxHash = currentMailboxHash;
   }
+  // Counts below are always over the full, unfiltered rows - a quick filter
+  // narrows what's displayed, not the mailbox's real unread/total state.
   totalCount = rows.length;
   unreadCount = rows.filter((r) => !r.is_seen).length;
   currentMailboxOwnUnread = unreadCount;
@@ -2049,8 +2096,9 @@ function renderMessageRows(rows) {
   pinnedFolderEl.style.display = showPinnedFolder ? "" : "none";
   pinnedListEl.innerHTML = "";
   const canMove = hasMoveTargets(currentMailboxHash);
+  const visibleRows = applyQuickFilters(rows);
   const regularRows = [];
-  for (const row of rows) {
+  for (const row of visibleRows) {
     if (showPinnedFolder && row.is_flagged) {
       pinnedListEl.appendChild(buildRow(row, canMove));
     } else {
@@ -2059,7 +2107,7 @@ function renderMessageRows(rows) {
   }
   setVirtualRows(regularRows, (row) => buildRow(row, canMove));
   updatePinnedFolderCount();
-  prefetchTopBodies(rows);
+  prefetchTopBodies(visibleRows);
 }
 
 function prefetchTopBodies(rows, limit = 5) {
@@ -2195,6 +2243,7 @@ function unifiedContributingMailboxes(category) {
   return contributors;
 }
 function renderUnifiedRows(rows) {
+  lastUnifiedRows = rows;
   totalCount = rows.length;
   unreadCount = rows.filter((r) => !r.is_seen).length;
   currentMailboxOwnUnread = unreadCount;
@@ -2215,8 +2264,9 @@ function renderUnifiedRows(rows) {
     return canMove;
   };
 
+  const visibleRows = applyQuickFilters(rows);
   const regularRows = [];
-  for (const row of rows) {
+  for (const row of visibleRows) {
     if (showPinnedFolder && row.is_flagged) {
       pinnedListEl.appendChild(buildRow(row, canMoveFor(row)));
     } else {
@@ -2225,7 +2275,7 @@ function renderUnifiedRows(rows) {
   }
   setVirtualRows(regularRows, (row) => buildRow(row, canMoveFor(row)));
   updatePinnedFolderCount();
-  prefetchTopBodies(rows);
+  prefetchTopBodies(visibleRows);
 }
 
 async function loadUnifiedMessages() {

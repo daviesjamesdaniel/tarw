@@ -617,6 +617,38 @@ body {
   border: none;
 }
 
+.quick-filters {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+.quick-filter-chip {
+  padding: 0.2rem 0.6rem;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.65;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.quick-filter-chip:hover {
+  opacity: 0.9;
+}
+
+.quick-filter-chip[aria-pressed="true"] {
+  opacity: 1;
+  background: rgba(124, 92, 255, 0.15);
+  border-color: #7c5cff;
+  color: #7c5cff;
+  font-weight: 600;
+}
+
 .pinned-folder {
   border-bottom: 1px solid rgba(128, 128, 128, 0.3);
 }
