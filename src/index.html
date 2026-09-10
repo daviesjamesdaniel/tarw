@@ -194,6 +194,29 @@
       </form>
     </div>
 
+    <div id="update-modal-overlay" class="compose-overlay" hidden>
+      <div class="compose-panel update-modal-panel">
+        <div class="compose-header">
+          <span>Update available: <span id="update-modal-version"></span></span>
+          <button type="button" id="update-modal-close" class="compose-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="update-modal-body">
+          <div id="update-modal-notes" class="update-modal-notes" hidden></div>
+          <p>Select your distro, then copy and run this in a terminal:</p>
+          <div class="update-distro-tabs">
+            <button type="button" class="update-distro-tab" data-distro="arch">Arch / CachyOS</button>
+            <button type="button" class="update-distro-tab" data-distro="debian">Debian / Ubuntu</button>
+            <button type="button" class="update-distro-tab" data-distro="fedora">Fedora / openSUSE</button>
+          </div>
+          <pre id="update-modal-snippet" class="update-modal-snippet"></pre>
+        </div>
+        <div class="compose-footer">
+          <button type="button" id="update-modal-copy" class="compose-secondary">Copy</button>
+          <button type="button" id="update-modal-done" class="compose-send">Done</button>
+        </div>
+      </div>
+    </div>
+
     <div id="create-mailbox-overlay" class="compose-overlay" hidden>
       <form id="create-mailbox-form" class="compose-panel create-mailbox-panel">
         <div class="compose-header">

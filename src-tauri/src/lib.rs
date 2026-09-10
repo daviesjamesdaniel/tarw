@@ -763,6 +763,54 @@ fn provider_by_id(id: String) -> Option<ProviderConfig> {
     providers::by_id(&id)
 }
 
+#[derive(Serialize)]
+struct UpdateInfo {
+    version: String,
+    url: String,
+    notes: String,
+}
+
+#[derive(serde::Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    html_url: String,
+    #[serde(default)]
+    body: Option<String>,
+}
+
+/// Silent on any failure (offline, rate-limited, GitHub down) - this is a
+/// best-effort notice, never something that should block startup or surface
+/// an error to the user. Deliberately no version-range/semver-precedence
+/// logic - a plain string inequality against GitHub's own "latest" release
+/// is enough, since GitHub already picks the newest non-prerelease tag.
+#[tauri::command]
+async fn check_for_update() -> Option<UpdateInfo> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("tarw-update-check")
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .ok()?;
+        let release: GithubRelease = client
+            .get("https://api.github.com/repos/daviesjamesdaniel/tarw/releases/latest")
+            .send()
+            .ok()?
+            .json()
+            .ok()?;
+        let latest = release.tag_name.trim_start_matches('v');
+        if latest == env!("CARGO_PKG_VERSION") {
+            return None;
+        }
+        Some(UpdateInfo {
+            version: latest.to_string(),
+            url: release.html_url,
+            notes: release.body.unwrap_or_default(),
+        })
+    })
+    .await
+    .ok()?
+}
+
 /// A no-op if there's no OAuth login currently in progress for this email -
 /// the frontend calls this unconditionally when the add-account modal is
 /// cancelled/closed, since it doesn't need to track whether a sign-in is
@@ -1017,6 +1065,7 @@ pub fn run() {
             list_accounts,
             detect_provider,
             provider_by_id,
+            check_for_update,
             test_imap_connection,
             cancel_oauth_login
         ])

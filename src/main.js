@@ -140,6 +140,12 @@ let filterAttachmentOnly = false;
 let lastMailboxRows = null;
 let lastUnifiedRows = null;
 
+// Populated once at startup by the fire-and-forget update check below -
+// null until (and unless) a real newer release is found. Silent on any
+// failure (offline, rate-limited, GitHub down) - this is a best-effort
+// notice, not something that should ever surface an error to the user.
+let availableUpdate = null;
+
 function applyQuickFilters(rows) {
   if (!filterUnreadOnly && !filterAttachmentOnly) return rows;
   return rows.filter((row) => {
@@ -648,7 +654,12 @@ function renderMailboxTabs() {
     e.stopPropagation();
     toggleMailboxManagePanel();
   });
-  mailboxTabsEl.appendChild(manageBtn);
+  const rightGroup = document.createElement("div");
+  rightGroup.className = "mailbox-tabs-right";
+  const updateIndicator = buildUpdateIndicator();
+  if (updateIndicator) rightGroup.appendChild(updateIndicator);
+  rightGroup.appendChild(manageBtn);
+  mailboxTabsEl.appendChild(rightGroup);
 }
 
 let mailboxContextMenuMailbox = null;
@@ -1183,6 +1194,117 @@ function closeMailboxManagePanelOnOutsideClick(e) {
   }
 }
 
+
+// Built into a right-aligned wrapper alongside the gear/manage-folders
+// button (mailbox-tabs-right has margin-left:auto - the gear itself no
+// longer does, so it travels together with this instead of the indicator
+// getting stranded next to the last tab while the gear alone jumps to the
+// far edge). Both renderMailboxTabs() and renderUnifiedTabs() clear
+// #mailbox-tabs's innerHTML on every call, so this is rebuilt each time
+// rather than existing as a standalone persistent element.
+function buildUpdateIndicator() {
+  if (!availableUpdate) return null;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "update-indicator";
+  btn.title = `Update available: v${availableUpdate.version}`;
+  btn.textContent = `v${availableUpdate.version}`;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openUpdateModal();
+  });
+  return btn;
+}
+
+// Per-distro update snippets - kept in sync by hand with the equivalent
+// README sections (see packaging/deb, packaging/rpm, packaging/arch), since
+// there's no shared templating between the two. Each does a fresh clone
+// into /tmp rather than assuming an existing checkout location/state.
+const UPDATE_SNIPPETS = {
+  arch: `git clone https://github.com/daviesjamesdaniel/tarw.git /tmp/tarw-update
+cd /tmp/tarw-update/packaging/arch
+makepkg -si`,
+  debian: `git clone https://github.com/daviesjamesdaniel/tarw.git /tmp/tarw-update
+cd /tmp/tarw-update
+cargo install cargo-deb --locked
+cd src-tauri
+cargo deb --locked
+sudo apt install ./target/debian/tarw_*.deb`,
+  fedora: `git clone https://github.com/daviesjamesdaniel/tarw.git /tmp/tarw-update
+cd /tmp/tarw-update
+cargo install cargo-generate-rpm --locked
+cd src-tauri
+cargo build --release --locked
+cargo generate-rpm
+sudo dnf install ./target/generate-rpm/tarw-*.rpm`,
+};
+
+let updateModalDistro = "arch";
+
+function renderUpdateModalSnippet() {
+  const modal = document.getElementById("update-modal-overlay");
+  modal.querySelectorAll(".update-distro-tab").forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.distro === updateModalDistro);
+  });
+  document.getElementById("update-modal-snippet").textContent = UPDATE_SNIPPETS[updateModalDistro];
+}
+
+function openUpdateModal() {
+  closeSettingsPanel();
+  if (!availableUpdate) return;
+  document.getElementById("update-modal-version").textContent = `v${availableUpdate.version}`;
+  const notesEl = document.getElementById("update-modal-notes");
+  const notes = (availableUpdate.notes || "").trim();
+  notesEl.hidden = notes.length === 0;
+  // textContent, not innerHTML - release notes come from GitHub's API and
+  // are untrusted text, not markup to render.
+  notesEl.textContent = notes;
+  renderUpdateModalSnippet();
+  document.getElementById("update-modal-overlay").hidden = false;
+}
+
+function closeUpdateModal() {
+  document.getElementById("update-modal-overlay").hidden = true;
+}
+
+document.getElementById("update-modal-close").addEventListener("click", closeUpdateModal);
+document.getElementById("update-modal-done").addEventListener("click", closeUpdateModal);
+document.getElementById("update-modal-overlay").addEventListener("click", (e) => {
+  if (e.target.id === "update-modal-overlay") closeUpdateModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !document.getElementById("update-modal-overlay").hidden) closeUpdateModal();
+});
+document.querySelectorAll(".update-distro-tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    updateModalDistro = tab.dataset.distro;
+    renderUpdateModalSnippet();
+  });
+});
+document.getElementById("update-modal-copy").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  const text = UPDATE_SNIPPETS[updateModalDistro];
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Clipboard API can be unreliable in this WebKitGTK setup (same family
+    // of quirk as window.confirm() elsewhere) - fall back to a hidden
+    // textarea + execCommand, which works even when the async API throws.
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+  const original = btn.textContent;
+  btn.textContent = "Copied!";
+  setTimeout(() => {
+    btn.textContent = original;
+  }, 1500);
+});
 
 let settingsPanelEl = null;
 
@@ -2217,7 +2339,12 @@ function renderUnifiedTabs() {
     e.stopPropagation();
     toggleUnifiedManagePanel();
   });
-  mailboxTabsEl.appendChild(manageBtn);
+  const rightGroup = document.createElement("div");
+  rightGroup.className = "mailbox-tabs-right";
+  const updateIndicator = buildUpdateIndicator();
+  if (updateIndicator) rightGroup.appendChild(updateIndicator);
+  rightGroup.appendChild(manageBtn);
+  mailboxTabsEl.appendChild(rightGroup);
 }
 
 async function switchUnifiedTab(key) {
@@ -3903,6 +4030,15 @@ async function purgeOrphanedAccountCaches(registeredEmails) {
     loadMailboxes();
   }
 })();
+
+invoke("check_for_update")
+  .then((info) => {
+    availableUpdate = info;
+    if (!availableUpdate) return;
+    if (unifiedActive) renderUnifiedTabs();
+    else renderMailboxTabs();
+  })
+  .catch(() => {});
 
 function prependNewMailRow(account, row) {
   const inbox = (mailboxesByAccount[account] ?? []).find((m) => m.special_usage === "Inbox");

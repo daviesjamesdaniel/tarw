@@ -350,11 +350,17 @@ body {
   font-weight: 600;
 }
 
+.mailbox-tabs-right {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
 .mailbox-manage-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-left: auto;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -1128,6 +1134,90 @@ body {
 
 .create-mailbox-panel {
   width: min(20rem, 90vw);
+}
+
+.update-modal-panel {
+  width: min(32rem, 90vw);
+}
+
+.update-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1rem;
+}
+
+.update-modal-body p {
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.update-modal-notes {
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(124, 92, 255, 0.08);
+  font-size: 0.82rem;
+  white-space: pre-line;
+}
+
+.update-distro-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.update-distro-tab {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.65;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.update-distro-tab:hover {
+  opacity: 0.9;
+}
+
+.update-distro-tab.active {
+  opacity: 1;
+  background: rgba(124, 92, 255, 0.15);
+  border-color: #7c5cff;
+  color: #7c5cff;
+  font-weight: 600;
+}
+
+.update-modal-snippet {
+  margin: 0;
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  font-family: monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.update-indicator {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.55rem;
+  border: none;
+  border-radius: 999px;
+  background: rgba(124, 92, 255, 0.15);
+  color: #7c5cff;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.update-indicator:hover {
+  background: rgba(124, 92, 255, 0.25);
 }
 
 .forward-attachments-summary {

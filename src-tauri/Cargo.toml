@@ -49,6 +49,9 @@ xdg = "2"
 imap-codec = "=2.0.0-alpha.6"
 imap-types = "=2.0.0-alpha.6"
 oauth2 = { version = "5.0.0", features = ["reqwest-blocking"] }
+# Declared directly (not just relied on transitively via oauth2) so our own
+# code can call it - used only for the startup GitHub-releases update check.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
 keyring = { version = "4.1.6", features = ["v1", "dbus-secret-service-keyring-store"] }
 base64 = "0.23.1"
 tauri-plugin-dialog = "2.7.2"
