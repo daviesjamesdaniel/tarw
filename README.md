@@ -11,6 +11,10 @@
   A FOSS, native Linux email client — Wayland-first, built on real IMAP/SMTP infrastructure.
 </p>
 
+<p align="center">
+  <a href="https://buymeacoffee.com/tarw"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-tarw-ffdd00?logo=buy-me-a-coffee&logoColor=black" alt="Buy me a coffee"></a>
+</p>
+
 Tarw (Welsh for "bull" — a nod to Tauri/Taurus) is a genuinely beautiful native email client for Linux.
 
 ## Stack
