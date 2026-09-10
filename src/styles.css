@@ -248,6 +248,35 @@ body {
   height: 14px;
 }
 
+.settings-panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.15rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+.settings-panel-coffee-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem;
+  border-radius: 6px;
+  color: inherit;
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+
+.settings-panel-coffee-link:hover {
+  opacity: 0.9;
+  background: rgba(255, 189, 46, 0.12);
+}
+
+.settings-panel-coffee-link svg {
+  width: 14px;
+  height: 14px;
+}
+
 .compose-button {
   border: none;
   border-radius: 6px;
