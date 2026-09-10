@@ -145,6 +145,12 @@ let lastUnifiedRows = null;
 // failure (offline, rate-limited, GitHub down) - this is a best-effort
 // notice, not something that should ever surface an error to the user.
 let availableUpdate = null;
+let currentAppVersion = "";
+invoke("app_version")
+  .then((v) => {
+    currentAppVersion = v;
+  })
+  .catch(() => {});
 
 function applyQuickFilters(rows) {
   if (!filterUnreadOnly && !filterAttachmentOnly) return rows;
@@ -1321,6 +1327,7 @@ async function toggleSettingsPanel() {
     </div>
     <div class="settings-panel-account-list" id="settings-account-list"></div>
     <div class="settings-panel-footer">
+      <span class="settings-panel-version">${currentAppVersion ? `v${escapeHtml(currentAppVersion)}` : ""}</span>
       <a href="https://buymeacoffee.com/tarw" class="settings-panel-coffee-link" title="Buy me a coffee" aria-label="Buy me a coffee">${ICONS.coffee}</a>
     </div>`;
   settingsPanelEl = panel;

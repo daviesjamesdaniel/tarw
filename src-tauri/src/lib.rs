@@ -763,6 +763,11 @@ fn provider_by_id(id: String) -> Option<ProviderConfig> {
     providers::by_id(&id)
 }
 
+#[tauri::command]
+fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
 #[derive(Serialize)]
 struct UpdateInfo {
     version: String,
@@ -1066,6 +1071,7 @@ pub fn run() {
             detect_provider,
             provider_by_id,
             check_for_update,
+            app_version,
             test_imap_connection,
             cancel_oauth_login
         ])

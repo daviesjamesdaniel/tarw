@@ -250,10 +250,16 @@ body {
 
 .settings-panel-footer {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   margin-top: 0.15rem;
   padding-top: 0.4rem;
   border-top: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+.settings-panel-version {
+  opacity: 0.4;
+  font-size: 0.72rem;
 }
 
 .settings-panel-coffee-link {
@@ -1138,6 +1144,10 @@ body {
 
 .update-modal-panel {
   width: min(32rem, 90vw);
+}
+
+.update-modal-coffee-link {
+  margin-right: auto;
 }
 
 .update-modal-body {
