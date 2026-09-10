@@ -979,6 +979,17 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        // Must be registered before any other plugin (Tauri's own
+        // requirement) - a second launch hands off to this one instead of
+        // starting a second process, avoiding real on-disk cache
+        // corruption from two processes hitting the same melib sqlite
+        // files at once.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
