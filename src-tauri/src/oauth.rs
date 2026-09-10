@@ -66,12 +66,12 @@ fn try_refresh(email: &str, cfg: &OAuthProviderConfig) -> melib::Result<Option<S
         Err(e) => return Err(err(format!("Could not read stored refresh token: {e}"))),
     };
 
-    let (client_id, client_secret) = (cfg.client_id.clone(), cfg.client_secret.clone());
-    let client = BasicClient::new(ClientId::new(client_id))
-        .set_client_secret(ClientSecret::new(client_secret))
-        .set_token_uri(
-            TokenUrl::new(cfg.token_url.clone()).map_err(|e| err(format!("bad token url: {e}")))?,
-        );
+    let mut client = BasicClient::new(ClientId::new(cfg.client_id.clone())).set_token_uri(
+        TokenUrl::new(cfg.token_url.clone()).map_err(|e| err(format!("bad token url: {e}")))?,
+    );
+    if let Some(secret) = &cfg.client_secret {
+        client = client.set_client_secret(ClientSecret::new(secret.clone()));
+    }
 
     let http = http_client()?;
     let token_result = client
@@ -94,8 +94,6 @@ fn interactive_login(email: &str, cfg: &OAuthProviderConfig) -> melib::Result<St
         .insert(email.to_string(), cancel_flag.clone());
     let _guard = PendingLoginGuard(email.to_string());
 
-    let (client_id, client_secret) = (cfg.client_id.clone(), cfg.client_secret.clone());
-
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| {
         err(format!(
             "Could not bind a local port for the OAuth redirect: {e}"
@@ -105,10 +103,15 @@ fn interactive_login(email: &str, cfg: &OAuthProviderConfig) -> melib::Result<St
         .local_addr()
         .map_err(|e| err(format!("Could not read local port: {e}")))?
         .port();
-    let redirect_uri = format!("http://127.0.0.1:{port}/");
+    // "localhost", not "127.0.0.1" - Microsoft's port-any-matching for a
+    // registered loopback redirect URI is documented specifically for the
+    // literal "localhost" hostname (Google's "Desktop app" client type
+    // accepts both, so this is a safe no-op for the Gmail flow too). Same
+    // loopback address either way, just a different string for the OAuth
+    // provider's redirect_uri match.
+    let redirect_uri = format!("http://localhost:{port}/");
 
-    let client = BasicClient::new(ClientId::new(client_id))
-        .set_client_secret(ClientSecret::new(client_secret))
+    let mut client = BasicClient::new(ClientId::new(cfg.client_id.clone()))
         .set_auth_uri(
             AuthUrl::new(cfg.auth_url.clone()).map_err(|e| err(format!("bad auth url: {e}")))?,
         )
@@ -118,6 +121,9 @@ fn interactive_login(email: &str, cfg: &OAuthProviderConfig) -> melib::Result<St
         .set_redirect_uri(
             RedirectUrl::new(redirect_uri).map_err(|e| err(format!("bad redirect url: {e}")))?,
         );
+    if let Some(secret) = &cfg.client_secret {
+        client = client.set_client_secret(ClientSecret::new(secret.clone()));
+    }
 
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
