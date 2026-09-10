@@ -27,6 +27,7 @@ const removeAccountTargetEl = document.getElementById("remove-account-target");
 const removeAccountErrorEl = document.getElementById("remove-account-error");
 const removeAccountConfirmEl = document.getElementById("remove-account-confirm");
 const addAccountOverlayEl = document.getElementById("add-account-overlay");
+const addAccountTitleEl = document.getElementById("add-account-title");
 const addAccountFormEl = document.getElementById("add-account-form");
 const addAccountEmailEl = document.getElementById("add-account-email");
 const addAccountErrorEl = document.getElementById("add-account-error");
@@ -1222,7 +1223,7 @@ function renderSettingsAccountRows(container, accountList) {
 
     row.querySelector(".settings-edit-account").addEventListener("click", (e) => {
       e.stopPropagation();
-      alert("Account editing isn't built yet - coming with proper multi-account support.");
+      openEditAccountModal(acct);
     });
     row.querySelector(".settings-remove-account").addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1311,11 +1312,14 @@ removeAccountFormEl.addEventListener("submit", async (e) => {
 let detectedAddAccountProvider = null;
 let addAccountOAuthInFlightEmail = null;
 let addAccountStep = "email";
+let addAccountIsEditing = false;
 
 function openAddAccountModal() {
   closeSettingsPanel();
   addAccountFormEl.reset();
   addAccountErrorEl.textContent = "";
+  addAccountTitleEl.textContent = "Add account";
+  addAccountIsEditing = false;
   detectedAddAccountProvider = null;
   addAccountDetectedForEmail = null;
   addAccountDetectPromise = null;
@@ -1328,6 +1332,59 @@ function openAddAccountModal() {
   addAccountSendEl.textContent = "Continue";
   addAccountOverlayEl.hidden = false;
   addAccountEmailEl.focus();
+}
+
+// Reuses the add-account modal/backend wholesale rather than a separate edit
+// flow: accounts::add() (Rust) already upserts by email, so submitting this
+// modal for an existing account just replaces its provider/credentials and
+// reconnects - no new backend command needed beyond looking the builtin
+// provider config back up by id (detect_provider works from an email domain,
+// not helpful here since the account's own domain may not match its id).
+async function openEditAccountModal(acct) {
+  closeSettingsPanel();
+  addAccountFormEl.reset();
+  addAccountErrorEl.textContent = "";
+  addAccountTitleEl.textContent = "Edit account";
+  addAccountIsEditing = true;
+  addAccountOAuthInFlightEmail = null;
+  addAccountEmailEl.value = acct.email;
+  addAccountEmailEl.disabled = true;
+  addAccountStatusEl.hidden = true;
+  addAccountStep = "credentials";
+  addAccountOverlayEl.hidden = false;
+
+  if (acct.provider.kind === "builtin") {
+    try {
+      detectedAddAccountProvider = await invoke("provider_by_id", { id: acct.provider.id });
+    } catch (err) {
+      addAccountErrorEl.textContent = `${err}`;
+      detectedAddAccountProvider = null;
+    }
+  } else {
+    detectedAddAccountProvider = null;
+  }
+
+  if (detectedAddAccountProvider && detectedAddAccountProvider.auth_method === "o_auth2") {
+    addAccountManualHostFieldsEl.hidden = true;
+    addAccountPasswordFieldEl.hidden = true;
+    addAccountSendEl.textContent = "Re-authenticate";
+  } else if (detectedAddAccountProvider) {
+    // Builtin password provider (Fastmail/iCloud) - host/port are fixed by
+    // the provider config, only the password can actually change.
+    addAccountManualHostFieldsEl.hidden = true;
+    addAccountPasswordFieldEl.hidden = false;
+    addAccountSendEl.textContent = "Save";
+    addAccountPasswordEl.focus();
+  } else {
+    addAccountManualHostFieldsEl.hidden = false;
+    addAccountPasswordFieldEl.hidden = false;
+    addAccountImapHostEl.value = acct.provider.imap_host;
+    addAccountImapPortEl.value = acct.provider.imap_port;
+    addAccountSmtpHostEl.value = acct.provider.smtp_host;
+    addAccountSmtpPortEl.value = acct.provider.smtp_port;
+    addAccountSendEl.textContent = "Save";
+    addAccountImapHostEl.focus();
+  }
 }
 
 function closeAddAccountModal() {
@@ -1408,7 +1465,8 @@ async function performAddAccount(email) {
     addAccountOAuthInFlightEmail = null;
     addAccountSendEl.disabled = false;
     addAccountStatusEl.hidden = true;
-    addAccountSendEl.textContent = detectedAddAccountProvider && detectedAddAccountProvider.auth_method === "o_auth2" ? "Sign in" : "Add account";
+    const isOAuth = detectedAddAccountProvider && detectedAddAccountProvider.auth_method === "o_auth2";
+    addAccountSendEl.textContent = addAccountIsEditing ? (isOAuth ? "Re-authenticate" : "Save") : isOAuth ? "Sign in" : "Add account";
   }
 }
 

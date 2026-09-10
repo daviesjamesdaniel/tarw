@@ -756,6 +756,13 @@ fn detect_provider(email: String) -> Option<ProviderConfig> {
     providers::detect_from_email(&email)
 }
 
+/// Used by the edit-account flow to re-derive a builtin account's provider
+/// config from its stored id, without re-running email-domain detection.
+#[tauri::command]
+fn provider_by_id(id: String) -> Option<ProviderConfig> {
+    providers::by_id(&id)
+}
+
 /// A no-op if there's no OAuth login currently in progress for this email -
 /// the frontend calls this unconditionally when the add-account modal is
 /// cancelled/closed, since it doesn't need to track whether a sign-in is
@@ -998,6 +1005,7 @@ pub fn run() {
             add_account,
             list_accounts,
             detect_provider,
+            provider_by_id,
             test_imap_connection,
             cancel_oauth_login
         ])
