@@ -463,13 +463,36 @@ body {
 }
 
 .unified-manage-account-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
   font-size: 0.72rem;
   font-weight: 600;
   opacity: 0.6;
   margin-bottom: 0.3rem;
+}
+
+.unified-manage-account-heading span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.unified-manage-add-btn {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.8;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.15rem 0.4rem;
+  cursor: pointer;
+}
+
+.unified-manage-add-btn:hover {
+  opacity: 1;
 }
 
 .unified-manage-row {

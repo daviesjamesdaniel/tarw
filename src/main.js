@@ -730,10 +730,15 @@ mailboxContextMenuEl.addEventListener("click", (e) => {
 });
 
 let createMailboxParent = null;
+let createMailboxAccount = null;
+let createMailboxUnified = false;
 
-function openCreateMailbox(parentMailbox) {
+function openCreateMailbox(parentMailbox, account = activeAccount, unified = false) {
   createMailboxParent = parentMailbox;
-  createMailboxTitleEl.textContent = parentMailbox ? `New folder in ${parentMailbox.name}` : "New folder";
+  createMailboxAccount = account;
+  createMailboxUnified = unified;
+  const title = parentMailbox ? `New folder in ${parentMailbox.name}` : "New folder";
+  createMailboxTitleEl.textContent = unified ? `${title} (${account})` : title;
   createMailboxFormEl.reset();
   createMailboxErrorEl.textContent = "";
   createMailboxOverlayEl.hidden = false;
@@ -757,18 +762,27 @@ createMailboxFormEl.addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = createMailboxNameEl.value.trim();
   const path = createMailboxParent ? `${createMailboxParent.path}/${name}` : name;
+  const account = createMailboxAccount;
+  const unified = createMailboxUnified;
   createMailboxErrorEl.textContent = "";
   createMailboxSendEl.disabled = true;
   createMailboxSendEl.textContent = "Creating…";
   try {
-    mailboxes = await invoke("create_mailbox", { account: activeAccount, path });
+    const updated = await invoke("create_mailbox", { account, path });
     closeCreateMailbox();
-    const created = mailboxes.find((m) => m.path === path);
-    if (created) {
-      currentTabLevelParentHash = createMailboxParent ? createMailboxParent.hash : null;
-      await switchMailbox(created.hash);
+    if (unified) {
+      mailboxesByAccount[account] = updated;
+      if (unifiedManagePanelEl) renderUnifiedManagePanelBody(unifiedManagePanelEl);
+      renderUnifiedTabs();
     } else {
-      renderMailboxTabs();
+      mailboxes = updated;
+      const created = mailboxes.find((m) => m.path === path);
+      if (created) {
+        currentTabLevelParentHash = createMailboxParent ? createMailboxParent.hash : null;
+        await switchMailbox(created.hash);
+      } else {
+        renderMailboxTabs();
+      }
     }
   } catch (err) {
     createMailboxErrorEl.textContent = `${err}`;
@@ -2618,6 +2632,37 @@ function buildUnifiedManageRow(account, mailbox, hidden) {
   return row;
 }
 
+function renderUnifiedManagePanelBody(panel) {
+  panel.textContent = "";
+  for (const account of unifiedAccounts) {
+    const group = document.createElement("div");
+    group.className = "unified-manage-account-group";
+
+    const heading = document.createElement("div");
+    heading.className = "unified-manage-account-heading";
+    const nameEl = document.createElement("span");
+    nameEl.textContent = account;
+    heading.appendChild(nameEl);
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "unified-manage-add-btn";
+    addBtn.title = `New folder in ${account}`;
+    addBtn.textContent = "+";
+    addBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openCreateMailbox(null, account, true);
+    });
+    heading.appendChild(addBtn);
+    group.appendChild(heading);
+
+    const hidden = getHiddenMailboxes(account);
+    for (const mailbox of orderedMailboxes(mailboxesByAccount[account] ?? [])) {
+      group.appendChild(buildUnifiedManageRow(account, mailbox, hidden));
+    }
+    panel.appendChild(group);
+  }
+}
+
 async function toggleUnifiedManagePanel() {
   if (unifiedManagePanelEl) {
     closeUnifiedManagePanel();
@@ -2640,22 +2685,7 @@ async function toggleUnifiedManagePanel() {
     return;
   }
   if (unifiedManagePanelEl !== panel) return;
-  panel.textContent = "";
-
-  for (const account of unifiedAccounts) {
-    const group = document.createElement("div");
-    group.className = "unified-manage-account-group";
-    const heading = document.createElement("div");
-    heading.className = "unified-manage-account-heading";
-    heading.textContent = account;
-    group.appendChild(heading);
-
-    const hidden = getHiddenMailboxes(account);
-    for (const mailbox of orderedMailboxes(mailboxesByAccount[account] ?? [])) {
-      group.appendChild(buildUnifiedManageRow(account, mailbox, hidden));
-    }
-    panel.appendChild(group);
-  }
+  renderUnifiedManagePanelBody(panel);
 
   // Listener registration delayed to the next tick to avoid the opening click immediately triggering a close
   setTimeout(() => document.addEventListener("click", closeUnifiedManagePanelOnOutsideClick), 0);
