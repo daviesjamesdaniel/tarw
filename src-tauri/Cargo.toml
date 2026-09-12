@@ -1,6 +1,6 @@
 [package]
 name = "tarw"
-version = "0.2.7"
+version = "0.2.8"
 description = "A native Linux email client (Tauri + Rust IMAP backend)"
 authors = ["Dan Davies"]
 edition = "2021"
