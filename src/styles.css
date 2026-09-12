@@ -113,7 +113,9 @@ body {
   position: absolute;
   top: 100%;
   left: 0;
-  z-index: 2;
+  /* Must beat the sticky quick-filters row's z-index:3 (added later) or
+     this dropdown renders underneath it wherever the two overlap. */
+  z-index: 10;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -390,7 +392,9 @@ body {
   position: absolute;
   top: 100%;
   right: 0.75rem;
-  z-index: 2;
+  /* Same reason as .settings-panel above - must beat the sticky
+     quick-filters row's z-index:3. */
+  z-index: 10;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
