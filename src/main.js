@@ -439,6 +439,44 @@ function setMailboxOrder(order) {
   }
 }
 
+// Unified tab order is keyed by category string (e.g. "Inbox", "custom:Foo")
+// rather than a mailbox hash - those keys already merge same-named
+// mailboxes across accounts, and stay stable regardless of which accounts
+// happen to be in unifiedAccounts, so one global key (not per-account) is
+// enough, same as unifiedActive/showAccountPills elsewhere.
+function getUnifiedTabOrder() {
+  try {
+    return JSON.parse(localStorage.getItem("unifiedTabOrder") || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function setUnifiedTabOrder(order) {
+  try {
+    localStorage.setItem("unifiedTabOrder", JSON.stringify(order));
+  } catch {
+  }
+}
+
+function orderedUnifiedKeys(keys) {
+  const order = getUnifiedTabOrder();
+  if (order.length === 0) return keys;
+  const remaining = new Set(keys);
+  const ordered = [];
+  for (const key of order) {
+    if (remaining.has(key)) {
+      ordered.push(key);
+      remaining.delete(key);
+    }
+  }
+  for (const key of keys) {
+    if (remaining.has(key)) ordered.push(key);
+  }
+  return ordered;
+}
+
+
 function orderedMailboxes(list = mailboxes) {
   const order = list === mailboxes ? getMailboxOrder() : [];
   if (order.length === 0) return list;
@@ -457,13 +495,20 @@ function orderedMailboxes(list = mailboxes) {
   return ordered;
 }
 
-function reorderedMailboxHashes(draggedHash, targetHash) {
-  const order = orderedMailboxes().map((m) => m.hash);
-  const from = order.indexOf(draggedHash);
-  const to = order.indexOf(targetHash);
+// Shared by both the normal per-account tab bar and the Unified Inbox one -
+// reads the currently-*rendered* tab order straight from the DOM rather
+// than reconstructing it from whatever's saved, so it's always correct
+// regardless of mode and can't accidentally drop a tab that isn't yet in
+// any saved order.
+function reorderedTabKeys(draggedKey, targetKey) {
+  const order = Array.from(mailboxTabsEl.querySelectorAll(".mailbox-tab[data-hash]")).map(
+    (el) => el.dataset.hash,
+  );
+  const from = order.indexOf(draggedKey);
+  const to = order.indexOf(targetKey);
   if (from === -1 || to === -1 || from === to) return order;
   order.splice(from, 1);
-  order.splice(to, 0, draggedHash);
+  order.splice(to, 0, draggedKey);
   return order;
 }
 
@@ -647,10 +692,10 @@ function effectiveChildren(hash, list = mailboxes) {
   );
 }
 
-function allDescendantHashes(hash) {
-  const direct = effectiveChildren(hash);
+function allDescendantHashes(hash, list = mailboxes) {
+  const direct = effectiveChildren(hash, list);
   let hashes = direct.map((m) => m.hash);
-  for (const child of direct) hashes = hashes.concat(allDescendantHashes(child.hash));
+  for (const child of direct) hashes = hashes.concat(allDescendantHashes(child.hash, list));
   return hashes;
 }
 
@@ -737,10 +782,13 @@ function onTabPointerUp(e) {
     .forEach((el) => el.classList.remove("dragging", "drag-over"));
   const target = document.elementFromPoint(e.clientX, e.clientY)?.closest(".mailbox-tab");
   if (target?.dataset.hash && target.dataset.hash !== draggedHash) {
-    setMailboxOrder(reorderedMailboxHashes(draggedHash, target.dataset.hash));
+    const newOrder = reorderedTabKeys(draggedHash, target.dataset.hash);
+    if (unifiedActive) setUnifiedTabOrder(newOrder);
+    else setMailboxOrder(newOrder);
   }
   suppressNextTabClick = true;
-  renderMailboxTabs();
+  if (unifiedActive) renderUnifiedTabs();
+  else renderMailboxTabs();
 }
 
 function mailboxTracksUnread(mailbox) {
@@ -821,14 +869,21 @@ let mailboxContextMenuMailbox = null;
 
 let mailboxContextMenuUnifiedCategory = null;
 
-function openMailboxContextMenu(x, y, mailbox, unifiedCategory = null) {
+let mailboxContextMenuUnifiedDeleteTarget = null;
+
+function openMailboxContextMenu(x, y, mailbox, unifiedCategory = null, unifiedDeleteTarget = null) {
   mailboxContextMenuMailbox = mailbox;
   mailboxContextMenuUnifiedCategory = unifiedCategory;
+  mailboxContextMenuUnifiedDeleteTarget = unifiedDeleteTarget;
 
   const newAction = mailboxContextMenuEl.querySelector('[data-action="new"]');
   newAction.parentElement.hidden = unifiedActive;
   const deleteAction = mailboxContextMenuEl.querySelector('[data-action="delete"]');
-  deleteAction.parentElement.hidden = unifiedActive || !mailbox || mailbox.special_usage !== "Normal";
+  // A tab is only deletable when it resolves to exactly one mailbox owned by
+  // one account — either a normal per-account tab, or a unified tab whose
+  // category isn't shared across multiple accounts.
+  const deleteTarget = mailbox ?? unifiedDeleteTarget?.mailbox;
+  deleteAction.parentElement.hidden = !deleteTarget || deleteTarget.special_usage !== "Normal";
 
   const markAllReadAction = mailboxContextMenuEl.querySelector('[data-action="mark-all-read"]');
   markAllReadAction.parentElement.hidden = !mailbox && !unifiedCategory;
@@ -864,6 +919,7 @@ mailboxContextMenuEl.addEventListener("click", (e) => {
   if (!button) return;
   const mailbox = mailboxContextMenuMailbox;
   const unifiedCategory = mailboxContextMenuUnifiedCategory;
+  const unifiedDeleteTarget = mailboxContextMenuUnifiedDeleteTarget;
   closeMailboxContextMenu();
   if (button.dataset.action === "new") {
     openCreateMailbox(mailbox);
@@ -873,8 +929,9 @@ mailboxContextMenuEl.addEventListener("click", (e) => {
   } else if (button.dataset.action === "empty") {
     if (unifiedCategory) openEmptyMailboxModal(null, unifiedCategory);
     else if (mailbox) openEmptyMailboxModal(mailbox);
-  } else if (button.dataset.action === "delete" && mailbox) {
-    void deleteMailboxTab(mailbox);
+  } else if (button.dataset.action === "delete") {
+    if (mailbox) void deleteMailboxTab(mailbox, activeAccount);
+    else if (unifiedDeleteTarget) void deleteMailboxTab(unifiedDeleteTarget.mailbox, unifiedDeleteTarget.account);
   }
 });
 
@@ -941,21 +998,24 @@ createMailboxFormEl.addEventListener("submit", async (e) => {
   }
 });
 
-function computeMailboxDeletionImpact(mailbox) {
-  const descendantHashes = allDescendantHashes(mailbox.hash);
-  const affected = [mailbox, ...descendantHashes.map((h) => mailboxes.find((m) => m.hash === h))].filter(
-    Boolean,
-  );
+function computeMailboxDeletionImpact(mailbox, accountMailboxes) {
+  const descendantHashes = allDescendantHashes(mailbox.hash, accountMailboxes);
+  const affected = [
+    mailbox,
+    ...descendantHashes.map((h) => accountMailboxes.find((m) => m.hash === h)),
+  ].filter(Boolean);
   const totalMessages = affected.reduce((sum, m) => sum + (m.total ?? 0), 0);
   return { descendantHashes, totalMessages };
 }
 
 let deleteMailboxTarget = null;
+let deleteMailboxTargetAccount = null;
 
-function openDeleteMailboxModal(mailbox, descendantHashes, totalMessages) {
+function openDeleteMailboxModal(mailbox, descendantHashes, totalMessages, account, accountMailboxes) {
   deleteMailboxTarget = mailbox;
+  deleteMailboxTargetAccount = account;
   const parentMailbox = mailbox.parent_hash
-    ? mailboxes.find((m) => m.hash === mailbox.parent_hash)
+    ? accountMailboxes.find((m) => m.hash === mailbox.parent_hash)
     : null;
   deleteMailboxMoveLabelEl.textContent = `Move messages to ${parentMailbox ? parentMailbox.name : "Inbox"}`;
 
@@ -969,7 +1029,7 @@ function openDeleteMailboxModal(mailbox, descendantHashes, totalMessages) {
 
   if (descendantHashes.length > 0) {
     const names = descendantHashes
-      .map((h) => mailboxes.find((m) => m.hash === h)?.name)
+      .map((h) => accountMailboxes.find((m) => m.hash === h)?.name)
       .filter(Boolean);
     deleteMailboxSubfoldersEl.textContent = `Subfolders: ${names.join(", ")}`;
     deleteMailboxSubfoldersEl.hidden = false;
@@ -985,6 +1045,7 @@ function openDeleteMailboxModal(mailbox, descendantHashes, totalMessages) {
 function closeDeleteMailboxModal() {
   deleteMailboxOverlayEl.hidden = true;
   deleteMailboxTarget = null;
+  deleteMailboxTargetAccount = null;
 }
 
 document.getElementById("delete-mailbox-cancel").addEventListener("click", closeDeleteMailboxModal);
@@ -1000,11 +1061,12 @@ deleteMailboxFormEl.addEventListener("submit", async (e) => {
   e.preventDefault();
   const policy = deleteMailboxFormEl.querySelector('input[name="delete-mailbox-policy"]:checked').value;
   const mailbox = deleteMailboxTarget;
+  const account = deleteMailboxTargetAccount;
   deleteMailboxErrorEl.textContent = "";
   deleteMailboxConfirmEl.disabled = true;
   deleteMailboxConfirmEl.textContent = "Deleting…";
   try {
-    await performMailboxDeletion(mailbox, policy);
+    await performMailboxDeletion(mailbox, policy, account);
     closeDeleteMailboxModal();
   } catch (err) {
     deleteMailboxErrorEl.textContent = `${err}`;
@@ -1014,13 +1076,28 @@ deleteMailboxFormEl.addEventListener("submit", async (e) => {
   }
 });
 
-async function performMailboxDeletion(mailbox, policy) {
-  mailboxes = await invoke("delete_mailbox", {
-    account: activeAccount,
+async function performMailboxDeletion(mailbox, policy, account) {
+  const updated = await invoke("delete_mailbox", {
+    account,
     mailboxHash: mailbox.hash,
     messages: policy,
   });
 
+  if (unifiedActive) {
+    mailboxesByAccount[account] = updated;
+    const stillExists = unifiedAccounts.some((a) =>
+      (mailboxesByAccount[a] ?? []).some((m) => unifiedCategoryKey(m) === currentUnifiedCategory),
+    );
+    if (!stillExists) {
+      currentUnifiedCategory = "Inbox";
+      showEmptyReadingPane();
+    }
+    renderUnifiedTabs();
+    await loadUnifiedMessages();
+    return;
+  }
+
+  mailboxes = updated;
   if (currentTabLevelParentHash && !mailboxes.some((m) => m.hash === currentTabLevelParentHash)) {
     currentTabLevelParentHash = null;
   }
@@ -1183,18 +1260,19 @@ emptyMailboxFormEl.addEventListener("submit", async (e) => {
   }
 });
 
-async function deleteMailboxTab(mailbox) {
-  const { descendantHashes, totalMessages } = computeMailboxDeletionImpact(mailbox);
+async function deleteMailboxTab(mailbox, account) {
+  const accountMailboxes = unifiedActive ? (mailboxesByAccount[account] ?? []) : mailboxes;
+  const { descendantHashes, totalMessages } = computeMailboxDeletionImpact(mailbox, accountMailboxes);
   if (totalMessages === 0 && descendantHashes.length === 0) {
     if (!confirm(`Delete folder "${mailbox.name}"?`)) return;
     try {
-      await performMailboxDeletion(mailbox, "move_to_parent");
+      await performMailboxDeletion(mailbox, "move_to_parent", account);
     } catch (err) {
       alert(`Could not delete folder: ${err}`);
     }
     return;
   }
-  openDeleteMailboxModal(mailbox, descendantHashes, totalMessages);
+  openDeleteMailboxModal(mailbox, descendantHashes, totalMessages, account, accountMailboxes);
 }
 
 let mailboxManagePanelEl = null;
@@ -2490,20 +2568,35 @@ function renderUnifiedTabs() {
   const customKeys = keys
     .filter((k) => k.startsWith("custom:"))
     .sort((a, b) => labels.get(a).localeCompare(labels.get(b)));
-  const ordered = ["Inbox", ...specialKeys, ...customKeys];
+  const ordered = orderedUnifiedKeys(["Inbox", ...specialKeys, ...customKeys]);
   for (const key of ordered) {
     if (!labels.has(key)) continue;
     const tab = document.createElement("button");
     tab.type = "button";
     tab.className = "mailbox-tab" + (!viewingSearch && key === currentUnifiedCategory ? " active" : "");
+    tab.dataset.hash = key;
     const badgeCount = badgeCounts.get(key) ?? 0;
     tab.innerHTML =
       `<span class="mailbox-tab-name">${escapeHtml(labels.get(key))}</span>` +
       (badgeCount > 0 ? `<span class="mailbox-tab-badge">${badgeCount}</span>` : "");
-    tab.addEventListener("click", () => switchUnifiedTab(key));
+    tab.addEventListener("click", () => {
+      if (suppressNextTabClick) {
+        suppressNextTabClick = false;
+        return;
+      }
+      switchUnifiedTab(key);
+    });
+    tab.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      dragState = { hash: key, startX: e.clientX, startY: e.clientY, dragging: false };
+      document.addEventListener("mousemove", onTabPointerMove);
+      document.addEventListener("mouseup", onTabPointerUp);
+    });
     tab.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      openMailboxContextMenu(e.clientX, e.clientY, null, key);
+      const contributors = unifiedContributingMailboxes(key);
+      const deleteTarget = contributors.length === 1 ? contributors[0] : null;
+      openMailboxContextMenu(e.clientX, e.clientY, null, key, deleteTarget);
     });
     mailboxTabsEl.appendChild(tab);
   }
