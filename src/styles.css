@@ -532,7 +532,9 @@ body {
 .search-grid thead th {
   position: sticky;
   top: 0;
-  background: #1e1e26;
+  /* Same bug/fix as .quick-filters above - this should match the real page
+     background it sits on top of, not the floating-panel color. */
+  background: Canvas;
   text-align: left;
   font-weight: 500;
   font-size: 0.75rem;
@@ -657,12 +659,13 @@ body {
   display: flex;
   gap: 0.4rem;
   padding: 0.5rem 1rem;
-  /* Matches the page's real (never explicitly declared - this is
-     WebKitGTK's dark color-scheme default canvas) background, sampled
-     live from a screenshot - #1e1e26 is a different, deliberately
-     distinct color reserved for floating/elevated panels (settings,
-     modals), not the flat list background this sits directly on top of. */
-  background: #1c2425;
+  /* The CSS system-color keyword for the browser's own default page
+     background under the active color-scheme - genuinely the same value
+     the rest of the (otherwise unstyled) page background already uses,
+     rather than a hardcoded approximation of it. Two earlier guesses
+     (#1e1e26, then a hand-sampled #1c2425) each looked visibly off by eye
+     despite seeming close on paper. */
+  background: Canvas;
   border-bottom: 1px solid rgba(128, 128, 128, 0.15);
 }
 
