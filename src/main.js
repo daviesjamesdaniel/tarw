@@ -138,9 +138,10 @@ let searchRenderPending = null;
 let filterUnreadOnly = false;
 let filterAttachmentOnly = false;
 // Separate from the two filters above - this doesn't remove rows, it
-// changes how the remaining rows are grouped for display. Session-only,
-// same reasoning as the filters.
-let threadViewEnabled = false;
+// changes how the remaining rows are grouped for display. Unlike the
+// session-only filters, this is a persisted view-mode preference (settings
+// panel toggle, same convention as Unified Inbox/Show account labels).
+let threadViewEnabled = localStorage.getItem("threadViewEnabled") === "1";
 let lastMailboxRows = null;
 let lastUnifiedRows = null;
 
@@ -349,14 +350,6 @@ quickFilterUnreadEl.addEventListener("click", () => {
 quickFilterAttachmentEl.addEventListener("click", () => {
   filterAttachmentOnly = !filterAttachmentOnly;
   quickFilterAttachmentEl.setAttribute("aria-pressed", String(filterAttachmentOnly));
-  rerenderCurrentMailboxView();
-});
-
-const quickFilterThreadedEl = document.getElementById("quick-filter-threaded");
-
-quickFilterThreadedEl.addEventListener("click", () => {
-  threadViewEnabled = !threadViewEnabled;
-  quickFilterThreadedEl.setAttribute("aria-pressed", String(threadViewEnabled));
   rerenderCurrentMailboxView();
 });
 
@@ -582,8 +575,18 @@ function buildRow(row, canMove) {
       <span class="received-date">${escapeHtml(formatReceivedDate(row.date))}</span>
     </div>
     <div class="subject-line">${escapeHtml(row.subject)}</div>`;
-  li.addEventListener("click", () => openMessage(row, li));
-
+  // Clicking the header row body does both: opens that message (it's never
+  // separately re-listed among the revealed children, so this is the only
+  // way to actually read it) and expands the thread if it isn't already -
+  // doesn't re-collapse on a second click, since that's the chevron's own
+  // dedicated job below, not something a click that's also opening a
+  // message should surprise you with.
+  li.addEventListener("click", () => {
+    openMessage(row, li);
+    if (row.__threadCount > 1 && !row.__threadExpanded) {
+      toggleThreadExpanded(row.__threadKey);
+    }
+  });
   if (row.__threadCount > 1) {
     li.querySelector(".thread-toggle").addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1538,6 +1541,10 @@ function renderSettingsAccountRows(container, accountList) {
 
   container.appendChild(
     buildToggleRow("Unified Inbox", unifiedActive, toggleUnifiedInbox, "settings-panel-unified-row"),
+  );
+
+  container.appendChild(
+    buildToggleRow("Threaded", threadViewEnabled, toggleThreadView, "settings-panel-unified-row"),
   );
 
   if (unifiedActive) {
@@ -2888,6 +2895,21 @@ async function toggleAccountPills() {
     }
   }
   if (unifiedActive) await loadUnifiedMessages();
+}
+
+async function toggleThreadView() {
+  threadViewEnabled = !threadViewEnabled;
+  localStorage.setItem("threadViewEnabled", threadViewEnabled ? "1" : "");
+  const container = settingsPanelEl?.querySelector("#settings-account-list");
+  if (container) {
+    try {
+      renderSettingsAccountRows(container, await invoke("list_accounts"));
+    } catch (err) {
+      console.error("list_accounts failed", err);
+      showErrorToast(`Couldn't load accounts: ${err}`);
+    }
+  }
+  rerenderCurrentMailboxView();
 }
 
 function parseSearchQuery(raw) {
