@@ -224,6 +224,63 @@ function buildThreads(rows) {
   return threads;
 }
 
+// Session-only, same as the other view-state above - which threads are
+// currently expanded. Keyed by the thread's latest message's hash (stable
+// across re-renders as long as that message stays "latest" in the group).
+let expandedThreadKeys = new Set();
+
+function toggleThreadExpanded(key) {
+  if (expandedThreadKeys.has(key)) expandedThreadKeys.delete(key);
+  else expandedThreadKeys.add(key);
+  rerenderCurrentMailboxView();
+}
+
+// Flattens buildThreads()'s output back into the same flat row shape the
+// (non-threaded) virtual list already expects - a lone message is just
+// itself; a thread of 2+ becomes one "header" row (a shallow clone of its
+// latest message, tagged with thread metadata for buildRow() to render a
+// chevron+count on) followed by the rest of the thread's messages when
+// expanded. Every item is still a single normal-height row either way, so
+// the existing fixed-row-height virtualizer needs no changes at all -
+// expanding/collapsing just changes how many flat items there are, not
+// any item's own height.
+function flattenThreads(threads) {
+  const flat = [];
+  for (const thread of threads) {
+    // Mutate the real row objects in place (never clone) - togglePin/
+    // toggleRead update row.is_flagged/is_seen directly on whatever object
+    // reference they're handed, expecting it to be the same one held in
+    // lastMailboxRows/lastUnifiedRows. A clone here would silently revert
+    // on the next re-render since the mutation would land on a throwaway
+    // copy instead. The __thread* markers are just ephemeral per-render
+    // tags on the real object, reset every time this runs.
+    for (const msg of thread.messages) {
+      delete msg.__threadCount;
+      delete msg.__threadKey;
+      delete msg.__threadExpanded;
+      delete msg.__isThreadChild;
+    }
+    if (thread.messages.length === 1) {
+      flat.push(thread.messages[0]);
+      continue;
+    }
+    const header = thread.messages[0];
+    const key = header.hash;
+    const expanded = expandedThreadKeys.has(key);
+    header.__threadCount = thread.messages.length;
+    header.__threadKey = key;
+    header.__threadExpanded = expanded;
+    flat.push(header);
+    if (expanded) {
+      for (const msg of thread.messages.slice(1)) {
+        msg.__isThreadChild = true;
+        flat.push(msg);
+      }
+    }
+  }
+  return flat;
+}
+
 function applyQuickFilters(rows) {
   if (!filterUnreadOnly && !filterAttachmentOnly) return rows;
   return rows.filter((row) => {
@@ -487,24 +544,37 @@ function buildRow(row, canMove) {
   li.className = "inbox-row";
   li.dataset.hash = String(row.hash);
   if (!row.is_seen) li.classList.add("unread");
+  if (row.__threadCount > 1) li.classList.add("has-thread-toggle");
+  if (row.__isThreadChild) li.classList.add("thread-child-row");
+  // Re-derive the highlight at build time, not just at click time - the
+  // virtual list rebuilds every row from scratch on any re-render (scroll,
+  // quick-filter toggle, thread expand/collapse), which was silently
+  // dropping the currently-open message's highlight since openMessage()
+  // only ever set .selected as a one-off DOM mutation on the specific <li>
+  // clicked, with nothing to reapply it once that element was discarded.
+  if (row.hash === openMessageHash) li.classList.add("selected");
   let chipHtml = "";
   if (unifiedActive && showAccountPills) {
     const color = accountColor(row.account);
     chipHtml = `<span class="account-chip" style="background:${color.bg};color:${color.fg}" title="${escapeHtml(row.account)}">${escapeHtml(row.account.split("@")[0])}</span>`;
   }
-  li.innerHTML = `<div class="row-hover-zone row-hover-zone-left"></div>
-    <div class="row-hover-zone row-hover-zone-right"></div>
-    <div class="row-actions-left">
+  const threadToggleHtml =
+    row.__threadCount > 1
+      ? `<button type="button" class="thread-toggle" title="${row.__threadExpanded ? "Collapse thread" : "Expand thread"}">
+           <span class="thread-toggle-chevron"></span>${row.__threadCount}
+         </button>`
+      : "";
+  li.innerHTML = `<div class="row-hover-zone row-hover-zone-right"></div>
+    <div class="row-actions">
       <button class="row-action" data-action="pin" title="${row.is_flagged ? "Unpin" : "Pin"}">${row.is_flagged ? ICONS.pinFilled : ICONS.pinOutline}</button>
       <button class="row-action" data-action="toggle-read" title="${row.is_seen ? "Mark unread" : "Mark read"}">${row.is_seen ? ICONS.mailOpen : ICONS.mailClosed}</button>
-    </div>
-    <div class="row-actions">
       <button class="row-action" data-action="reply" title="Reply">${ICONS.reply}</button>
       <button class="row-action" data-action="reply-all" title="Reply All">${ICONS.replyAll}</button>
       <button class="row-action" data-action="forward" title="Forward">${ICONS.forward}</button>
       ${canMove ? `<button class="row-action" data-action="move-to" title="Move to&hellip;">${ICONS.moveTo}</button>` : ""}
       <button class="row-action" data-action="delete" title="Delete">${ICONS.delete}</button>
     </div>
+    ${threadToggleHtml}
     <div class="sender-line">
       <span class="sender-name"><span class="unread-dot" title="Unread"></span>${escapeHtml(row.from)}</span>
       ${row.has_attachments ? `<span class="attachment-icon" title="Has attachment">${ICONS.attachment}</span>` : ""}
@@ -514,12 +584,24 @@ function buildRow(row, canMove) {
     <div class="subject-line">${escapeHtml(row.subject)}</div>`;
   li.addEventListener("click", () => openMessage(row, li));
 
+  if (row.__threadCount > 1) {
+    li.querySelector(".thread-toggle").addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleThreadExpanded(row.__threadKey);
+    });
+    if (row.__threadExpanded) li.classList.add("thread-expanded");
+  }
+
   const rowActionsEl = li.querySelector(".row-actions");
   rowActionsEl.addEventListener("click", (e) => {
     e.stopPropagation();
     const button = e.target.closest(".row-action");
     if (!button) return;
-    if (button.dataset.action === "delete") {
+    if (button.dataset.action === "pin") {
+      togglePin(row, button, li);
+    } else if (button.dataset.action === "toggle-read") {
+      toggleRead(row, li);
+    } else if (button.dataset.action === "delete") {
       deleteMessage(row, li);
     } else if (button.dataset.action === "move-to") {
       const rect = button.getBoundingClientRect();
@@ -533,28 +615,12 @@ function buildRow(row, canMove) {
     }
   });
 
-  const leftActionsEl = li.querySelector(".row-actions-left");
-  leftActionsEl.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const button = e.target.closest(".row-action");
-    if (!button) return;
-    if (button.dataset.action === "pin") {
-      togglePin(row, button, li);
-    } else if (button.dataset.action === "toggle-read") {
-      toggleRead(row, li);
-    }
-  });
-
-  const leftZoneEl = li.querySelector(".row-hover-zone-left");
   const rightZoneEl = li.querySelector(".row-hover-zone-right");
   rightZoneEl.addEventListener("mouseenter", () => {
     li.classList.add("actions-visible-right");
   });
-  leftZoneEl.addEventListener("mouseenter", () => {
-    li.classList.add("actions-visible-left");
-  });
   li.addEventListener("mouseleave", () => {
-    li.classList.remove("actions-visible-right", "actions-visible-left");
+    li.classList.remove("actions-visible-right");
   });
 
   return li;
@@ -2328,7 +2394,13 @@ function renderMessageRows(rows) {
       regularRows.push(row);
     }
   }
-  setVirtualRows(regularRows, (row) => buildRow(row, canMove));
+  // Threading only ever groups the non-pinned rows above - a pinned message
+  // in an otherwise-threaded conversation still shows on its own in
+  // Pinned (per the user's explicit call: pin is a single-message concept,
+  // not a thread-level one), so it's simply absent from its thread's count
+  // here rather than double-shown.
+  const displayRows = threadViewEnabled ? flattenThreads(buildThreads(regularRows)) : regularRows;
+  setVirtualRows(displayRows, (row) => buildRow(row, canMove));
   updatePinnedFolderCount();
   prefetchTopBodies(visibleRows);
 }
@@ -2501,7 +2573,11 @@ function renderUnifiedRows(rows) {
       regularRows.push(row);
     }
   }
-  setVirtualRows(regularRows, (row) => buildRow(row, canMoveFor(row)));
+  // Same threading-excludes-pinned reasoning as renderMessageRows(). Real
+  // Message-IDs are globally unique, so grouping across accounts here
+  // can't accidentally merge unrelated messages from different accounts.
+  const displayRows = threadViewEnabled ? flattenThreads(buildThreads(regularRows)) : regularRows;
+  setVirtualRows(displayRows, (row) => buildRow(row, canMoveFor(row)));
   updatePinnedFolderCount();
   prefetchTopBodies(visibleRows);
 }

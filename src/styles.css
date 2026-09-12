@@ -824,6 +824,66 @@ body {
   opacity: 1;
 }
 
+/* The left edge is now permanently free of any hover-reveal content (both
+   action groups merged onto the right per the user's own redesign), so the
+   chevron+count badge lives there always-visible - no hover needed, and no
+   z-index contest with the row-actions hover reveal, unlike its first
+   placement on the right which sat right where those icons appear. */
+.inbox-row.has-thread-toggle {
+  padding-left: 2.75rem;
+}
+
+.thread-toggle {
+  position: absolute;
+  top: 50%;
+  left: 0.75rem;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.45rem;
+  border: none;
+  border-radius: 999px;
+  background: rgba(124, 92, 255, 0.15);
+  color: #7c5cff;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.thread-toggle:hover {
+  background: rgba(124, 92, 255, 0.25);
+}
+
+.thread-toggle-chevron {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transition: transform 0.15s ease;
+}
+
+.inbox-row.thread-expanded .thread-toggle-chevron {
+  transform: rotate(90deg);
+}
+
+.inbox-row.thread-child-row {
+  padding-left: 1.5rem;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+/* Three classes beats .thread-child-row's two, so this reliably wins
+   regardless of stylesheet order - without it, .thread-child-row's own
+   background (equal specificity to .selected, but declared later) silently
+   masked the highlight on any selected child row. */
+.inbox-row.thread-child-row.selected {
+  background: rgba(124, 92, 255, 0.18);
+}
+
 .inbox-row .subject-line {
   font-size: 0.78rem;
   opacity: 0.65;
@@ -834,8 +894,6 @@ body {
   pointer-events: none;
 }
 
-.inbox-row.actions-visible-left .sender-line,
-.inbox-row.actions-visible-left .subject-line,
 .inbox-row.actions-visible-right .sender-line,
 .inbox-row.actions-visible-right .subject-line {
   filter: blur(3px);
@@ -850,10 +908,6 @@ body {
   z-index: 0;
 }
 
-.row-hover-zone-left {
-  left: 0;
-}
-
 .row-hover-zone-right {
   right: 0;
 }
@@ -863,26 +917,10 @@ body {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 62%;
+  width: 78%;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.35rem;
-  padding: 0 0.75rem;
-  background: transparent;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.row-actions-left {
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 30%;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
   gap: 0.35rem;
   padding: 0 0.75rem;
   background: transparent;
@@ -912,10 +950,6 @@ body {
     background-color 0.15s ease;
 }
 
-.row-actions-left .row-action {
-  transform: translateX(-18px);
-}
-
 .row-action svg {
   width: 16px;
   height: 16px;
@@ -931,33 +965,26 @@ body {
   pointer-events: auto;
 }
 
-.inbox-row.actions-visible-left .row-actions-left .row-action {
-  opacity: 1;
-  transform: translateX(0);
-  pointer-events: auto;
-}
-
 .row-action:nth-child(1) {
-  transition-delay: 0.16s;
+  transition-delay: 0.24s;
 }
 .row-action:nth-child(2) {
-  transition-delay: 0.12s;
+  transition-delay: 0.2s;
 }
 .row-action:nth-child(3) {
-  transition-delay: 0.08s;
+  transition-delay: 0.16s;
 }
 .row-action:nth-child(4) {
-  transition-delay: 0.04s;
+  transition-delay: 0.12s;
 }
 .row-action:nth-child(5) {
-  transition-delay: 0s;
-}
-
-.row-actions-left .row-action:nth-child(1) {
-  transition-delay: 0s;
-}
-.row-actions-left .row-action:nth-child(2) {
   transition-delay: 0.08s;
+}
+.row-action:nth-child(6) {
+  transition-delay: 0.04s;
+}
+.row-action:nth-child(7) {
+  transition-delay: 0s;
 }
 
 .row-action[data-action="reply"],
