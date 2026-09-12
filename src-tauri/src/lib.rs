@@ -114,13 +114,18 @@ fn with_connection<T>(
     if pool.len() < POOL_SIZE {
         let provider = provider_for(state, account)?;
         let fresh = std::sync::Arc::new(Mutex::new(imap_client::connect(account, &provider)?));
-        state
-            .connections
-            .lock()
-            .unwrap()
-            .entry(account.to_string())
-            .or_default()
-            .push(fresh.clone());
+        // Re-check the *live* pool length under the lock, right before
+        // pushing: `pool` above is a snapshot taken before we connected, so
+        // two concurrent callers can both see room and both start
+        // connecting. Only add ours if the pool is still actually under
+        // capacity; otherwise just use this connection for this one call
+        // without keeping it, so the shared pool never exceeds POOL_SIZE.
+        let mut guard = state.connections.lock().unwrap();
+        let entry = guard.entry(account.to_string()).or_default();
+        if entry.len() < POOL_SIZE {
+            entry.push(fresh.clone());
+        }
+        drop(guard);
         let imap = fresh.lock().unwrap();
         return run_on_slot(state, account, &fresh, imap, &f);
     }
