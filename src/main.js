@@ -137,6 +137,10 @@ let searchRenderPending = null;
 // meant to be quick toggles rather than durable view state.
 let filterUnreadOnly = false;
 let filterAttachmentOnly = false;
+// Separate from the two filters above - this doesn't remove rows, it
+// changes how the remaining rows are grouped for display. Session-only,
+// same reasoning as the filters.
+let threadViewEnabled = false;
 let lastMailboxRows = null;
 let lastUnifiedRows = null;
 
@@ -151,6 +155,74 @@ invoke("app_version")
     currentAppVersion = v;
   })
   .catch(() => {});
+
+// Real reference-chain threading (not subject-matching) - a message links
+// to any ancestor whose Message-ID appears anywhere in its own References
+// list, not just the immediate parent. This means a thread still holds
+// together even if an intermediate reply is missing from this mailbox
+// (e.g. it lives in Sent, or was deleted), as long as some ancestor is
+// still present. Pure client-side, over rows already fully loaded for the
+// mailbox - no new backend calls, everything it needs (message_id/
+// references) rides on data already fetched for the list.
+//
+// Union-find with path compression: each row starts as its own set: two
+// rows land in the same set the moment either references the other's
+// Message-ID. Cheap and correct regardless of how many hops apart two
+// related messages are, or in what order rows happen to arrive in.
+function buildThreads(rows) {
+  const byMessageId = new Map();
+  for (const row of rows) {
+    if (row.message_id) byMessageId.set(row.message_id, row);
+  }
+
+  const parent = new Map();
+  const find = (key) => {
+    let root = key;
+    while (parent.get(root) !== root) root = parent.get(root);
+    let cur = key;
+    while (parent.get(cur) !== root) {
+      const next = parent.get(cur);
+      parent.set(cur, root);
+      cur = next;
+    }
+    return root;
+  };
+  const union = (a, b) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  };
+
+  for (const row of rows) {
+    const key = row.message_id || `__no-id-${row.hash}`;
+    if (!parent.has(key)) parent.set(key, key);
+  }
+  for (const row of rows) {
+    if (!row.message_id || !row.references) continue;
+    const ancestorIds = row.references.split(/\s+/).filter(Boolean);
+    for (const ancestorId of ancestorIds) {
+      if (byMessageId.has(ancestorId)) {
+        union(row.message_id, ancestorId);
+      }
+    }
+  }
+
+  const groups = new Map();
+  for (const row of rows) {
+    const key = row.message_id || `__no-id-${row.hash}`;
+    const root = find(key);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(row);
+  }
+
+  const threads = [];
+  for (const messages of groups.values()) {
+    messages.sort((a, b) => b.date - a.date);
+    threads.push({ messages, latestDate: messages[0].date });
+  }
+  threads.sort((a, b) => b.latestDate - a.latestDate);
+  return threads;
+}
 
 function applyQuickFilters(rows) {
   if (!filterUnreadOnly && !filterAttachmentOnly) return rows;
@@ -220,6 +292,14 @@ quickFilterUnreadEl.addEventListener("click", () => {
 quickFilterAttachmentEl.addEventListener("click", () => {
   filterAttachmentOnly = !filterAttachmentOnly;
   quickFilterAttachmentEl.setAttribute("aria-pressed", String(filterAttachmentOnly));
+  rerenderCurrentMailboxView();
+});
+
+const quickFilterThreadedEl = document.getElementById("quick-filter-threaded");
+
+quickFilterThreadedEl.addEventListener("click", () => {
+  threadViewEnabled = !threadViewEnabled;
+  quickFilterThreadedEl.setAttribute("aria-pressed", String(threadViewEnabled));
   rerenderCurrentMailboxView();
 });
 

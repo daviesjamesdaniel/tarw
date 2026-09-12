@@ -19,6 +19,13 @@ pub struct EnvelopeRow {
     pub is_seen: bool,
     pub is_flagged: bool,
     pub has_attachments: bool,
+    // For client-side thread grouping - references is the same
+    // space-separated bracketed-MessageID format already used by BodyResult
+    // below, so a thread's parent is just its last entry (matching melib's
+    // own Envelope::in_reply_to() fallback logic, re-derived client-side
+    // rather than sent as a separate field).
+    pub message_id: String,
+    pub references: String,
 }
 
 pub fn remove_account_data(email: &str) -> melib::Result<()> {
@@ -190,6 +197,8 @@ pub fn envelope_row(e: &Envelope) -> EnvelopeRow {
         is_seen: e.is_seen(),
         is_flagged: e.flags().is_flagged(),
         has_attachments: e.has_attachments(),
+        message_id: e.message_id().display_brackets().to_string(),
+        references: MessageID::display_slice(e.references(), Some(" ")),
     }
 }
 

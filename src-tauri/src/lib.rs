@@ -212,6 +212,8 @@ struct EnvelopeDto {
     is_seen: bool,
     is_flagged: bool,
     has_attachments: bool,
+    message_id: String,
+    references: String,
 }
 
 #[derive(Serialize)]
@@ -300,6 +302,8 @@ impl From<imap_client::EnvelopeRow> for EnvelopeDto {
             is_seen: r.is_seen,
             is_flagged: r.is_flagged,
             has_attachments: r.has_attachments,
+            message_id: r.message_id,
+            references: r.references,
         }
     }
 }
