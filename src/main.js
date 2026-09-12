@@ -1213,8 +1213,8 @@ function buildUpdateIndicator() {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "update-indicator";
-  btn.title = `Update available: v${availableUpdate.version}`;
-  btn.textContent = `v${availableUpdate.version}`;
+  btn.title = `Update Available: v${availableUpdate.version}`;
+  btn.textContent = `Update Available: v${availableUpdate.version}`;
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     openUpdateModal();
