@@ -451,8 +451,6 @@ body {
 }
 
 .unified-manage-panel {
-  max-height: 320px;
-  overflow-y: auto;
   min-width: 220px;
 }
 
