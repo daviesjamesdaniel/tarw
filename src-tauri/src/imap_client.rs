@@ -24,7 +24,16 @@ pub struct EnvelopeRow {
 pub fn remove_account_data(email: &str) -> melib::Result<()> {
     crate::oauth::forget_credentials(email)?;
     crate::password_auth::forget_password(email)?;
+    remove_cache_files(email)
+}
 
+/// Deletes just the on-disk sqlite header cache (main file + WAL/SHM
+/// sidecars), leaving credentials untouched - used both for full account
+/// removal above and as a self-heal step when the cache itself is corrupt
+/// (see `is_cache_corrupted`/`run_on_slot` in lib.rs). Safe either way: the
+/// IMAP server is always the real source of truth, melib rebuilds this
+/// cache from scratch on the next fetch.
+pub fn remove_cache_files(email: &str) -> melib::Result<()> {
     // melib itself owns this cache file and always uses its own crate name
     // as the XDG prefix, regardless of the embedding app's name - not "tarw".
     let xdg_dirs = xdg::BaseDirectories::with_prefix("meli").map_err(|e| {

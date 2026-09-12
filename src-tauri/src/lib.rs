@@ -53,6 +53,15 @@ fn is_connection_dead(err: &melib::Error) -> bool {
         || err.summary.contains("Disconnected")
 }
 
+/// A torn WAL/SHM sidecar (e.g. from a hard process kill mid-write) can
+/// leave melib's sqlite header cache genuinely unreadable. The server is
+/// always the real source of truth for mail, so the safe remedy is just to
+/// delete the cache and let melib rebuild it from scratch - not something
+/// the user should ever have to do by hand over SSH.
+fn is_cache_corrupted(err: &melib::Error) -> bool {
+    err.summary.contains("malformed") || err.summary.contains("disk image")
+}
+
 const POOL_SIZE: usize = 3;
 
 //Reuse a free slot, grow the pool if there is room, block on the first slot if full
@@ -102,8 +111,15 @@ fn run_on_slot<T>(
     let Err(err) = result else {
         return result;
     };
-    if !is_connection_dead(&err) {
+    let cache_corrupted = is_cache_corrupted(&err);
+    if !is_connection_dead(&err) && !cache_corrupted {
         return Err(err);
+    }
+    if cache_corrupted {
+        // Best-effort - if cleanup itself fails, still try to reconnect;
+        // the original corruption error is more useful to the caller than
+        // a cleanup-failure error would be.
+        let _ = imap_client::remove_cache_files(account);
     }
     let reconnect = provider_for(state, account).and_then(|provider| imap_client::connect(account, &provider));
     let Ok(fresh) = reconnect else {
