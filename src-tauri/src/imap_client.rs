@@ -481,8 +481,31 @@ fn attachment_infos(body: &melib::email::Attachment) -> Vec<AttachmentInfo> {
         .collect()
 }
 
-pub fn fetch_body(imap: &mut ImapType, hash: melib::email::EnvelopeHash) -> melib::Result<BodyResult> {
-    let bytes = block_on(imap.envelope_bytes_by_hash(hash)?)?;
+/// `mailbox_hash` lets us recover when the connection servicing this call
+/// (any of the pool's connections may pick it up) has never itself fetched
+/// the message's real mailbox - melib's `hash_index` is populated per
+/// connection instance, only as a side effect of a real FETCH (not just
+/// SELECT/EXAMINE), so a connection that has only ever touched a different
+/// mailbox genuinely has no idea this hash exists yet and returns "Message
+/// not found in local cache" - not a data problem, just a warm-up gap. Hit
+/// this for real opening a foreign-mailbox message surfaced via thread
+/// view. If we know which mailbox the hash belongs to, do one real listing
+/// of it to populate this connection's hash_index, then retry once.
+pub fn fetch_body(
+    imap: &mut ImapType,
+    hash: melib::email::EnvelopeHash,
+    mailbox_hash: Option<MailboxHash>,
+) -> melib::Result<BodyResult> {
+    let bytes = match imap.envelope_bytes_by_hash(hash) {
+        Ok(future) => block_on(future)?,
+        Err(err) => {
+            let Some(mailbox_hash) = mailbox_hash else {
+                return Err(err);
+            };
+            list_mailbox(imap, mailbox_hash)?;
+            block_on(imap.envelope_bytes_by_hash(hash)?)?
+        }
+    };
     let envelope = Envelope::from_bytes(&bytes, None)?;
     let attachment = envelope.body_bytes(&bytes);
     let attachments = attachment_infos(&attachment);

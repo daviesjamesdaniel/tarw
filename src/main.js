@@ -137,6 +137,7 @@ let searchRenderPending = null;
 // meant to be quick toggles rather than durable view state.
 let filterUnreadOnly = false;
 let filterAttachmentOnly = false;
+let filterConversationsOnly = false;
 // Separate from the two filters above - this doesn't remove rows, it
 // changes how the remaining rows are grouped for display. Unlike the
 // session-only filters, this is a persisted view-mode preference (settings
@@ -245,7 +246,7 @@ function toggleThreadExpanded(key) {
 // the existing fixed-row-height virtualizer needs no changes at all -
 // expanding/collapsing just changes how many flat items there are, not
 // any item's own height.
-function flattenThreads(threads) {
+function flattenThreads(threads, excludePinned) {
   const flat = [];
   for (const thread of threads) {
     // Mutate the real row objects in place (never clone) - togglePin/
@@ -261,11 +262,31 @@ function flattenThreads(threads) {
       delete msg.__threadExpanded;
       delete msg.__isThreadChild;
     }
+    // A message is "eligible" to be the always-visible header/singleton row
+    // for THIS mailbox view if it's not merged-in Inbox context (that can
+    // only ever appear as a revealed child, never standalone in a mailbox
+    // it doesn't actually belong to) and, on Inbox specifically, not
+    // already covered by its own dedicated Pinned row. If nothing in the
+    // thread qualifies (e.g. a lone Inbox context message with no relation
+    // to anything in the current folder, or a thread that's entirely
+    // pinned), there's nothing to add here.
+    const eligible = thread.messages.filter(
+      (m) => !m.__isForeignContext && (!excludePinned || !m.is_flagged),
+    );
+    if (eligible.length === 0) continue;
     if (thread.messages.length === 1) {
       flat.push(thread.messages[0]);
       continue;
     }
-    const header = thread.messages[0];
+    // The header (the always-visible collapsed row) is picked from the
+    // eligible members specifically, so a message that's already visible
+    // up in Pinned - or that isn't really part of this mailbox at all -
+    // doesn't also become a second always-visible row here. Expanding
+    // still reveals the whole real chain, pinned/foreign members included -
+    // "show the whole chain" per the user's own call, even though a pinned
+    // member is then briefly visible in two places.
+    const header = eligible[0];
+    const others = thread.messages.filter((m) => m !== header);
     const key = header.hash;
     const expanded = expandedThreadKeys.has(key);
     header.__threadCount = thread.messages.length;
@@ -273,7 +294,7 @@ function flattenThreads(threads) {
     header.__threadExpanded = expanded;
     flat.push(header);
     if (expanded) {
-      for (const msg of thread.messages.slice(1)) {
+      for (const msg of others) {
         msg.__isThreadChild = true;
         flat.push(msg);
       }
@@ -283,10 +304,25 @@ function flattenThreads(threads) {
 }
 
 function applyQuickFilters(rows) {
-  if (!filterUnreadOnly && !filterAttachmentOnly) return rows;
+  if (!filterUnreadOnly && !filterAttachmentOnly && !filterConversationsOnly) return rows;
+  // Conversation membership is computed from the full, unfiltered row set -
+  // whether a message "is part of a conversation" shouldn't depend on
+  // whatever other quick filters happen to also be active. Independent of
+  // the separate Threaded display setting (settings panel) - this narrows
+  // which rows show, it doesn't change how they're grouped.
+  let conversationHashes = null;
+  if (filterConversationsOnly) {
+    conversationHashes = new Set();
+    for (const thread of buildThreads(rows)) {
+      if (thread.messages.length > 1) {
+        for (const msg of thread.messages) conversationHashes.add(msg.hash);
+      }
+    }
+  }
   return rows.filter((row) => {
     if (filterUnreadOnly && row.is_seen) return false;
     if (filterAttachmentOnly && !row.has_attachments) return false;
+    if (filterConversationsOnly && !conversationHashes.has(row.hash)) return false;
     return true;
   });
 }
@@ -340,6 +376,7 @@ function rerenderCurrentMailboxView() {
 
 const quickFilterUnreadEl = document.getElementById("quick-filter-unread");
 const quickFilterAttachmentEl = document.getElementById("quick-filter-attachment");
+const quickFilterConversationsEl = document.getElementById("quick-filter-conversations");
 
 quickFilterUnreadEl.addEventListener("click", () => {
   filterUnreadOnly = !filterUnreadOnly;
@@ -350,6 +387,12 @@ quickFilterUnreadEl.addEventListener("click", () => {
 quickFilterAttachmentEl.addEventListener("click", () => {
   filterAttachmentOnly = !filterAttachmentOnly;
   quickFilterAttachmentEl.setAttribute("aria-pressed", String(filterAttachmentOnly));
+  rerenderCurrentMailboxView();
+});
+
+quickFilterConversationsEl.addEventListener("click", () => {
+  filterConversationsOnly = !filterConversationsOnly;
+  quickFilterConversationsEl.setAttribute("aria-pressed", String(filterConversationsOnly));
   rerenderCurrentMailboxView();
 });
 
@@ -2066,6 +2109,26 @@ function mailboxCacheKey(account, mailboxHash) {
   return `${account}::${mailboxHash}`;
 }
 
+// Pulls Inbox's already-cached rows purely as extra thread-grouping context
+// when viewing a different mailbox - a reply to something you sent usually
+// lands back in Inbox, not wherever the original lives, so without this a
+// thread would look artificially cut off outside Inbox itself. Never
+// triggers a new fetch (Inbox is essentially always already cached - it's
+// the default view on launch) and returns [] rather than fetching if it
+// genuinely isn't cached yet. Marks each row __isForeignContext so
+// flattenThreads() knows these may only ever appear as revealed children,
+// never as a standalone/header row in a mailbox they don't actually belong
+// to - real object references, not clones, so a read/pin toggle on a
+// revealed one still correctly updates the same row Inbox itself would see.
+function inboxContextRows(account, excludeMailboxHash) {
+  const inbox = (mailboxesByAccount[account] ?? []).find((m) => m.special_usage === "Inbox");
+  if (!inbox || inbox.hash === excludeMailboxHash) return [];
+  const cached = mailboxMessagesCache.get(mailboxCacheKey(account, inbox.hash));
+  if (!cached) return [];
+  for (const row of cached) row.__isForeignContext = true;
+  return cached;
+}
+
 let persistMailboxMessagesCacheTimer = null;
 // Debounced so rapid successive calls (e.g. several IDLE pushes in a row) only serialize and write the cache once
 function persistMailboxMessagesCache() {
@@ -2268,11 +2331,11 @@ const MESSAGE_BODY_DISK_CACHE_LIMIT = 40;
 function bodyCacheKey(account, hash) {
   return `${account}::${hash}`;
 }
-function fetchBodyCached(account, hash) {
+function fetchBodyCached(account, hash, mailboxHash) {
   const key = bodyCacheKey(account, hash);
   const cached = messageBodyCache.get(key);
   if (cached) return cached;
-  const promise = invoke("fetch_body", { account, hash })
+  const promise = invoke("fetch_body", { account, hash, mailboxHash })
     .then((body) => {
       persistMessageBodyCache(key, body);
       return body;
@@ -2448,6 +2511,11 @@ function renderMessageRows(rows) {
   for (const row of rows) {
     row.account = activeAccount;
     row.mailboxHash = currentMailboxHash;
+    // This mailbox's own rows are never foreign context, even if one of
+    // them was previously borrowed into some other mailbox's thread view
+    // (e.g. this is Inbox itself, rendered after being used as context
+    // elsewhere).
+    delete row.__isForeignContext;
   }
   // Counts below are always over the full, unfiltered rows - a quick filter
   // narrows what's displayed, not the mailbox's real unread/total state.
@@ -2479,12 +2547,19 @@ function renderMessageRows(rows) {
       regularRows.push(row);
     }
   }
-  // Threading only ever groups the non-pinned rows above - a pinned message
-  // in an otherwise-threaded conversation still shows on its own in
-  // Pinned (per the user's explicit call: pin is a single-message concept,
-  // not a thread-level one), so it's simply absent from its thread's count
-  // here rather than double-shown.
-  const displayRows = threadViewEnabled ? flattenThreads(buildThreads(regularRows)) : regularRows;
+  // Threading groups the FULL visible set (pinned included) plus, when not
+  // already viewing Inbox, Inbox's own already-cached rows purely as
+  // grouping context (a reply usually lands back in Inbox, not wherever
+  // the original message lives) - a pinned message is still a real
+  // conversation member, it just also gets its own dedicated row up in
+  // Pinned. flattenThreads() handles not double-adding a pinned-only
+  // thread, and never lets a merged-in Inbox message stand alone here.
+  const displayRows = threadViewEnabled
+    ? flattenThreads(
+        buildThreads([...visibleRows, ...inboxContextRows(activeAccount, currentMailboxHash)]),
+        showPinnedFolder,
+      )
+    : regularRows;
   setVirtualRows(displayRows, (row) => buildRow(row, canMove));
   updatePinnedFolderCount();
   prefetchTopBodies(visibleRows);
@@ -2494,7 +2569,7 @@ function prefetchTopBodies(rows, limit = 5) {
   // Deferred a tick so this doesn't delay the mailbox list itself from painting first
   setTimeout(() => {
     for (const row of rows.slice(0, limit)) {
-      fetchBodyCached(row.account, row.hash).catch(() => {});
+      fetchBodyCached(row.account, row.hash, row.mailboxHash).catch(() => {});
     }
   }, 0);
 }
@@ -2673,10 +2748,12 @@ function renderUnifiedRows(rows) {
       regularRows.push(row);
     }
   }
-  // Same threading-excludes-pinned reasoning as renderMessageRows(). Real
+  // Same full-set-including-pinned reasoning as renderMessageRows(). Real
   // Message-IDs are globally unique, so grouping across accounts here
   // can't accidentally merge unrelated messages from different accounts.
-  const displayRows = threadViewEnabled ? flattenThreads(buildThreads(regularRows)) : regularRows;
+  const displayRows = threadViewEnabled
+    ? flattenThreads(buildThreads(visibleRows), showPinnedFolder)
+    : regularRows;
   setVirtualRows(displayRows, (row) => buildRow(row, canMoveFor(row)));
   updatePinnedFolderCount();
   prefetchTopBodies(visibleRows);
@@ -3634,7 +3711,7 @@ function rowIsDraft(row) {
 
 async function editDraft(row) {
   try {
-    const draft = await invoke("fetch_body", { account: row.account, hash: row.hash });
+    const draft = await invoke("fetch_body", { account: row.account, hash: row.hash, mailboxHash: row.mailboxHash });
     openCompose({
       account: row.account,
       to: (draft.to ?? []).join(", "),
@@ -3678,7 +3755,7 @@ async function openMessage(row, li) {
   openMessageHash = hash;
   readingPaneEl.innerHTML = "<p class=\"placeholder\">Loading…</p>";
   try {
-    const { body, is_html, attachments, from, to, cc, date, subject } = await fetchBodyCached(row.account, hash);
+    const { body, is_html, attachments, from, to, cc, date, subject } = await fetchBodyCached(row.account, hash, row.mailboxHash);
     readingPaneEl.innerHTML = "";
     readingPaneEl.appendChild(buildMessageHeader({ subject, from, to, cc, date }));
     const bodyContainer = document.createElement("div");
@@ -3951,7 +4028,7 @@ document.addEventListener("keydown", (e) => {
 async function replyToMessage(row, mode) {
   let msg;
   try {
-    msg = await fetchBodyCached(row.account, row.hash);
+    msg = await fetchBodyCached(row.account, row.hash, row.mailboxHash);
   } catch (err) {
     alert(`Could not load the original message: ${err}`);
     return;

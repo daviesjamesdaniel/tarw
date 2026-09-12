@@ -398,12 +398,20 @@ async fn fetch_mailbox_messages_batch(
 }
 
 #[tauri::command]
-async fn fetch_body(app: tauri::AppHandle, account: String, hash: String) -> Result<BodyDto, String> {
+async fn fetch_body(
+    app: tauri::AppHandle,
+    account: String,
+    hash: String,
+    mailbox_hash: Option<String>,
+) -> Result<BodyDto, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let hash: u64 = hash.parse().map_err(|_| "invalid hash".to_string())?;
         let hash = melib::email::EnvelopeHash(hash);
+        let mailbox_hash = mailbox_hash.map(|s| parse_mailbox_hash(&s)).transpose()?;
         let state = app.state::<AppState>();
-        with_connection(&state, &account, |imap| imap_client::fetch_body(imap, hash))
+        with_connection(&state, &account, |imap| {
+            imap_client::fetch_body(imap, hash, mailbox_hash)
+        })
             .map(|r| BodyDto {
                 body: r.body,
                 is_html: r.is_html,
