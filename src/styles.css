@@ -651,9 +651,18 @@ body {
 }
 
 .quick-filters {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   gap: 0.4rem;
   padding: 0.5rem 1rem;
+  /* Matches the page's real (never explicitly declared - this is
+     WebKitGTK's dark color-scheme default canvas) background, sampled
+     live from a screenshot - #1e1e26 is a different, deliberately
+     distinct color reserved for floating/elevated panels (settings,
+     modals), not the flat list background this sits directly on top of. */
+  background: #1c2425;
   border-bottom: 1px solid rgba(128, 128, 128, 0.15);
 }
 
