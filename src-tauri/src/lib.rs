@@ -62,6 +62,36 @@ fn is_cache_corrupted(err: &melib::Error) -> bool {
     err.summary.contains("malformed") || err.summary.contains("disk image")
 }
 
+// Each pooled connection (see POOL_SIZE below) keeps its own independent
+// mailbox list, populated once on first use. A mailbox created or deleted
+// after that means every *other* pooled connection for the account is now
+// stale and doesn't know about it - melib's own retry-with-backoff (see the
+// fork's imap/mod.rs fetch()) eventually gives up with this message.
+fn is_unknown_mailbox(err: &melib::Error) -> bool {
+    err.summary.contains("no longer exists")
+}
+
+// Creating/deleting a mailbox only updates the one pooled connection that
+// performed it. Left alone, every other pooled connection would only learn
+// about the change the slow way - via melib's own multi-second
+// retry-with-backoff inside fetch() (see is_unknown_mailbox above) - the
+// first time something tries to use it. Refresh them all synchronously
+// right away instead, best-effort, so nothing has to pay that cost later.
+fn refresh_all_connections(state: &AppState, account: &str) {
+    let pool = state
+        .connections
+        .lock()
+        .unwrap()
+        .get(account)
+        .cloned()
+        .unwrap_or_default();
+    for conn in pool {
+        if let Ok(mut imap) = conn.lock() {
+            let _ = imap_client::refresh_mailboxes(&mut imap);
+        }
+    }
+}
+
 const POOL_SIZE: usize = 3;
 
 //Reuse a free slot, grow the pool if there is room, block on the first slot if full
@@ -112,8 +142,17 @@ fn run_on_slot<T>(
         return result;
     };
     let cache_corrupted = is_cache_corrupted(&err);
-    if !is_connection_dead(&err) && !cache_corrupted {
+    let unknown_mailbox = is_unknown_mailbox(&err);
+    if !is_connection_dead(&err) && !cache_corrupted && !unknown_mailbox {
         return Err(err);
+    }
+    if unknown_mailbox && !is_connection_dead(&err) {
+        // Cheaper than a full reconnect below: the connection itself is fine,
+        // it just never learned about a mailbox created/removed elsewhere.
+        // Refresh its mailbox list in place and retry once before giving up
+        // on it entirely.
+        let _ = imap_client::refresh_mailboxes(&mut imap);
+        return f(&mut imap);
     }
     if cache_corrupted {
         // Best-effort - if cleanup itself fails, still try to reconnect;
@@ -511,11 +550,15 @@ async fn delete_all_messages(app: tauri::AppHandle, account: String, mailbox_has
 async fn create_mailbox(app: tauri::AppHandle, account: String, path: String) -> Result<Vec<MailboxInfoDto>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        with_connection(&state, &account, |imap| {
+        let result = with_connection(&state, &account, |imap| {
             imap_client::create_mailbox(imap, path.clone())
         })
         .map(mailbox_infos_to_dtos)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+        if result.is_ok() {
+            refresh_all_connections(&state, &account);
+        }
+        result
     })
     .await
     .map_err(|e| e.to_string())?
@@ -536,11 +579,15 @@ async fn delete_mailbox(
             other => return Err(format!("invalid messages policy: {other}")),
         };
         let state = app.state::<AppState>();
-        with_connection(&state, &account, |imap| {
+        let result = with_connection(&state, &account, |imap| {
             imap_client::delete_mailbox(imap, mailbox_hash, messages)
         })
         .map(mailbox_infos_to_dtos)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+        if result.is_ok() {
+            refresh_all_connections(&state, &account);
+        }
+        result
     })
     .await
     .map_err(|e| e.to_string())?
