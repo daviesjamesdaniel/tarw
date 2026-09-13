@@ -396,6 +396,15 @@ quickFilterConversationsEl.addEventListener("click", () => {
   rerenderCurrentMailboxView();
 });
 
+function updateConversationsFilterVisibility() {
+  quickFilterConversationsEl.hidden = !threadViewEnabled;
+  if (!threadViewEnabled && filterConversationsOnly) {
+    filterConversationsOnly = false;
+    quickFilterConversationsEl.setAttribute("aria-pressed", "false");
+  }
+}
+updateConversationsFilterVisibility();
+
 document.addEventListener("contextmenu", (e) => e.preventDefault());
 
 mailboxTabsEl.addEventListener("contextmenu", (e) => {
@@ -3070,6 +3079,7 @@ async function toggleAccountPills() {
 async function toggleThreadView() {
   threadViewEnabled = !threadViewEnabled;
   localStorage.setItem("threadViewEnabled", threadViewEnabled ? "1" : "");
+  updateConversationsFilterVisibility();
   const container = settingsPanelEl?.querySelector("#settings-account-list");
   if (container) {
     try {
