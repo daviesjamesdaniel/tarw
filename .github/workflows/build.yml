@@ -160,9 +160,17 @@ jobs:
     permissions:
       contents: write
     steps:
+      # fetch-depth: 0 alone isn't enough for a tag-triggered run - actions/checkout
+      # can still leave the tag as a lightweight ref rather than the full annotated
+      # tag object, silently degrading %(contents:subject)/%(contents:body) below to
+      # the underlying commit's message instead of the tag's own (confirmed: this is
+      # exactly what happened on v0.3.6's first auto-published release - title came
+      # out as the commit message "Bump version to 0.3.6", not the tag's title, and
+      # the notes body was empty).
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       # Reads the annotated tag's own message as the release title/notes (first
       # line = title, rest = notes body) - written by hand at tag time same as
