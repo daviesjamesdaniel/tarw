@@ -22,10 +22,14 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
+      # rust/cargo/mold installed explicitly here rather than left for makepkg's
+      # own makedepends resolution - the rust-cache step below needs a working
+      # `rustc -vV` to compute its cache key, and that has to happen before
+      # `makepkg -s` would otherwise install the toolchain for the first time.
       - name: Install build dependencies
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git sudo
+          pacman -S --noconfirm base-devel git sudo rust cargo mold
 
       - uses: actions/checkout@v4
 
@@ -38,6 +42,23 @@ jobs:
           useradd -m builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
+
+      # The cache action itself still runs as root (the container's default
+      # user), so its restore lands as root-owned files - HOME=/home/builder
+      # points it at the same place `sudo -u builder` uses, and the chown
+      # step right after hands ownership to builder before the build needs to
+      # write new entries into it (a build failing to add a new dependency
+      # to a root-owned cache dir would be a confusing way to find this out).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+        env:
+          HOME: /home/builder
+
+      - name: Fix cache ownership for the build user
+        run: |
+          mkdir -p /home/builder/.cargo "$GITHUB_WORKSPACE/src-tauri/target"
+          chown -R builder:builder /home/builder/.cargo "$GITHUB_WORKSPACE/src-tauri/target"
 
       - name: Build and install the package
         run: sudo -u builder makepkg -si --noconfirm
