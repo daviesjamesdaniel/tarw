@@ -49,7 +49,6 @@ const pinnedFolderCountEl = document.getElementById("pinned-folder-count");
 const readingPaneEl = document.getElementById("reading-pane");
 
 let openMessageHash = null;
-let editingDraft = null;
 
 function showEmptyReadingPane() {
   openMessageHash = null;
@@ -65,32 +64,6 @@ const inboxListEl = document.getElementById("inbox-list");
 const searchResultsEl = document.getElementById("search-results");
 const searchGridBodyEl = document.getElementById("search-grid-body");
 const composeButtonEl = document.getElementById("compose-button");
-const composeOverlayEl = document.getElementById("compose-overlay");
-const composeFormEl = document.getElementById("compose-form");
-const composeAccountFieldEl = document.getElementById("compose-account-field");
-const composeAccountEl = document.getElementById("compose-account");
-const composeToEl = document.getElementById("compose-to");
-const composeCcEl = document.getElementById("compose-cc");
-const composeBccEl = document.getElementById("compose-bcc");
-const composeCcFieldEl = document.getElementById("compose-cc-field");
-const composeBccFieldEl = document.getElementById("compose-bcc-field");
-const composeShowCcEl = document.getElementById("compose-show-cc");
-const composeShowBccEl = document.getElementById("compose-show-bcc");
-const composeSubjectEl = document.getElementById("compose-subject");
-
-setupRecipientAutocomplete(composeToEl, document.getElementById("compose-to-suggestions"));
-setupRecipientAutocomplete(composeCcEl, document.getElementById("compose-cc-suggestions"));
-setupRecipientAutocomplete(composeBccEl, document.getElementById("compose-bcc-suggestions"));
-
-const composeBodyEl = document.getElementById("compose-body");
-const composeToolbarEl = document.getElementById("compose-toolbar");
-const composeLinkButtonEl = document.getElementById("compose-link-button");
-const composeTextColorEl = document.getElementById("compose-text-color");
-const composeHighlightColorEl = document.getElementById("compose-highlight-color");
-const composeAttachmentsBarEl = document.getElementById("compose-attachments-bar");
-const composeErrorEl = document.getElementById("compose-error");
-const composeSendEl = document.getElementById("compose-send");
-const composeSaveDraftEl = document.getElementById("compose-save-draft");
 const mailboxContextMenuEl = document.getElementById("mailbox-context-menu");
 const createMailboxOverlayEl = document.getElementById("create-mailbox-overlay");
 const createMailboxFormEl = document.getElementById("create-mailbox-form");
@@ -4071,7 +4044,7 @@ async function replyToMessage(row, mode) {
       `From: ${escapeHtml(msg.from)}<br>Date: ${escapeHtml(whenSent)}<br>` +
       `Subject: ${escapeHtml(msg.subject)}<br>To: ${escapeHtml(msg.to.join(", "))}${attachmentsLine}</p>` +
       `<blockquote>${originalHtml}</blockquote>`;
-    openCompose({ subject: ensureSubjectPrefix(msg.subject, "Fwd"), bodyHtml, forwardAttachments, account: row.account });
+    openCompose({ subject: ensureSubjectPrefix(msg.subject, "Fwd"), bodyHtml, forwardAttachments, account: row.account, mode: "forward" });
     return;
   }
 
@@ -4095,170 +4068,37 @@ async function replyToMessage(row, mode) {
     inReplyTo: msg.message_id,
     references: msg.references ? `${msg.references} ${msg.message_id}` : msg.message_id,
     account: row.account,
+    mode,
   });
 }
 
-let composeInReplyTo = "";
-let composeReferences = "";
-let composeForwardAttachments = null;
-
-function initComposeBodyDoc() {
-  const doc = composeBodyEl.contentDocument;
-  doc.open();
-  doc.write(
-    "<!doctype html><html><head><style>" +
-      'html,body{margin:0;padding:1rem;background:Canvas;color:CanvasText;' +
-      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:0.88rem;}' +
-      "blockquote{margin:0 0 0 0.5em;padding-left:1em;border-left:2px solid rgba(128,128,128,0.4);}" +
-      "img{max-width:100%;}" +
-      "</style></head><body contenteditable=\"true\"></body></html>",
-  );
-  doc.close();
-  doc.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeCompose();
-  });
-}
-initComposeBodyDoc();
-
-composeToolbarEl.addEventListener("click", (e) => {
-  const button = e.target.closest("button[data-cmd]");
-  if (!button) return;
-  composeBodyEl.contentWindow.focus();
-  composeBodyEl.contentDocument.execCommand(button.dataset.cmd, false, null);
-});
-
-composeLinkButtonEl.addEventListener("click", () => {
-  const doc = composeBodyEl.contentDocument;
-  const win = composeBodyEl.contentWindow;
-  win.focus();
-  const hasSelection = (win.getSelection()?.toString() ?? "").trim().length > 0;
-  const url = prompt("Link URL:");
-  if (!url) return;
-  if (hasSelection) {
-    doc.execCommand("createLink", false, url);
-  } else {
-    const safeUrl = escapeHtml(url);
-    doc.execCommand("insertHTML", false, `<a href="${safeUrl}">${safeUrl}</a>`);
-  }
-});
-
-composeTextColorEl.addEventListener("input", (e) => {
-  composeBodyEl.contentWindow.focus();
-  composeBodyEl.contentDocument.execCommand("foreColor", false, e.target.value);
-});
-
-composeHighlightColorEl.addEventListener("input", (e) => {
-  composeBodyEl.contentWindow.focus();
-  composeBodyEl.contentDocument.execCommand("hiliteColor", false, e.target.value);
-});
-
-function setComposeBodyHtml(html) {
-  composeBodyEl.contentDocument.body.innerHTML = html;
-}
-
-function getComposeBodyHtml() {
-  return composeBodyEl.contentDocument.body.innerHTML;
-}
-
-function placeComposeCaretAtStart() {
-  const doc = composeBodyEl.contentDocument;
-  const win = composeBodyEl.contentWindow;
-  const range = doc.createRange();
-  range.setStart(doc.body, 0);
-  range.collapse(true);
-  const sel = win.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-  win.focus();
-}
-
-function renderComposeAttachmentsBar() {
-  composeAttachmentsBarEl.innerHTML = "";
-  if (!composeForwardAttachments || composeForwardAttachments.attachments.length === 0) {
-    composeAttachmentsBarEl.hidden = true;
-    return;
-  }
-  composeAttachmentsBarEl.hidden = false;
-  const { sourceHash, sourceAccount, attachments } = composeForwardAttachments;
-  for (const att of attachments) {
-    const chip = document.createElement("div");
-    chip.className = "attachment-chip";
-    chip.title = `Open ${att.filename}`;
-    chip.innerHTML = `<span class="attachment-chip-icon">${ICONS.attachment}</span>
-      <span class="attachment-chip-name">${escapeHtml(att.filename)}</span>
-      <span class="attachment-chip-size">${formatFileSize(att.size)}</span>
-      <button class="attachment-chip-remove" type="button" title="Remove">&times;</button>`;
-    chip.addEventListener("click", () => openAttachment(sourceAccount, sourceHash, att.index));
-    chip.querySelector(".attachment-chip-remove").addEventListener("click", (e) => {
-      e.stopPropagation();
-      composeForwardAttachments.attachments = composeForwardAttachments.attachments.filter(
-        (a) => a.index !== att.index,
-      );
-      renderComposeAttachmentsBar();
-    });
-    composeAttachmentsBarEl.appendChild(chip);
-  }
-}
-
+// The composer lives in its own OS window (see compose.html/compose.js) so it can be
+// resized, maximized, and minimized independently of the main window - it's no longer an
+// in-page overlay. Opening one just hands prefill data to the backend (open_compose_window
+// stashes it keyed by the new window's label; compose.js pulls it via take_pending_compose
+// once the window is up and knows its own label) and gets a real window back.
 async function openCompose(prefill) {
-  editingDraft = prefill?.editingDraft ?? null;
-  composeFormEl.reset();
-  composeErrorEl.textContent = "";
-  composeCcFieldEl.hidden = true;
-  composeBccFieldEl.hidden = true;
-  composeShowCcEl.hidden = false;
-  composeShowBccEl.hidden = false;
-
-  composeToEl.value = prefill?.to ?? "";
-  composeSubjectEl.value = prefill?.subject ?? "";
-  setComposeBodyHtml(prefill?.bodyHtml ?? "<p><br></p>");
-  if (prefill?.cc) {
-    revealComposeField(composeCcFieldEl, composeShowCcEl, composeCcEl);
-    composeCcEl.value = prefill.cc;
-  }
-  composeInReplyTo = prefill?.inReplyTo ?? "";
-  composeReferences = prefill?.references ?? "";
-  composeForwardAttachments = prefill?.forwardAttachments ?? null;
-  renderComposeAttachmentsBar();
-
-  composeOverlayEl.hidden = false;
-  if (prefill) {
-    placeComposeCaretAtStart();
-  } else {
-    composeToEl.focus();
-  }
-
-  let accounts = [];
+  const title = prefill?.editingDraft
+    ? "Edit Draft"
+    : prefill?.mode === "forward"
+      ? "Forward"
+      : prefill?.mode === "reply-all"
+        ? "Reply All"
+        : prefill?.mode === "reply"
+          ? "Reply"
+          : "New Message";
+  const payload = {
+    ...prefill,
+    account: prefill?.account ?? activeAccount,
+    addressBook: [...recipientAddressBook.values()],
+  };
   try {
-    accounts = await invoke("list_accounts");
+    await invoke("open_compose_window", { title, prefill: payload });
   } catch (err) {
-    console.error("list_accounts failed", err);
-    showErrorToast(`Couldn't load accounts: ${err}`);
+    console.error("Failed to open compose window", err);
+    showErrorToast(`Couldn't open compose window: ${err}`);
   }
-  const desired = prefill?.account ?? activeAccount;
-  composeAccountEl.innerHTML = accounts
-    .map((a) => `<option value="${escapeHtml(a.email)}">${escapeHtml(a.email)}</option>`)
-    .join("");
-  composeAccountEl.value = accounts.some((a) => a.email === desired) ? desired : (accounts[0]?.email ?? "");
-  composeAccountFieldEl.hidden = accounts.length < 2;
 }
-
-function closeCompose() {
-  composeOverlayEl.hidden = true;
-}
-
-function revealComposeField(fieldEl, toggleEl, inputEl) {
-  fieldEl.hidden = false;
-  toggleEl.hidden = true;
-  inputEl.focus();
-}
-
-composeShowCcEl.addEventListener("click", () =>
-  revealComposeField(composeCcFieldEl, composeShowCcEl, composeCcEl),
-);
-composeShowBccEl.addEventListener("click", () =>
-  revealComposeField(composeBccFieldEl, composeShowBccEl, composeBccEl),
-);
 
 composeButtonEl.addEventListener("click", () => openCompose());
 
@@ -4267,33 +4107,6 @@ settingsButtonEl.addEventListener("click", (e) => {
   e.stopPropagation();
   toggleSettingsPanel();
 });
-document.getElementById("compose-cancel").addEventListener("click", closeCompose);
-document.getElementById("compose-close").addEventListener("click", closeCompose);
-
-composeOverlayEl.addEventListener("click", (e) => {
-  if (e.target === composeOverlayEl) closeCompose();
-});
-
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !composeOverlayEl.hidden) closeCompose();
-});
-
-function gatherComposeFields() {
-  const bodyHtml = getComposeBodyHtml();
-  return {
-    account: composeAccountEl.value,
-    to: composeToEl.value,
-    cc: composeCcEl.value,
-    bcc: composeBccEl.value,
-    subject: composeSubjectEl.value,
-    bodyHtml,
-    bodyText: htmlToPlainText(bodyHtml),
-    inReplyTo: composeInReplyTo,
-    references: composeReferences,
-    attachmentSourceHash: composeForwardAttachments?.sourceHash ?? "",
-    attachmentIndices: composeForwardAttachments?.attachments.map((a) => a.index) ?? [],
-  };
-}
 
 async function refreshMailboxView(account, mailboxHash) {
   mailboxMessagesCache.delete(mailboxCacheKey(account, mailboxHash));
@@ -4312,9 +4125,7 @@ async function refreshMailboxView(account, mailboxHash) {
   return false;
 }
 
-async function discardEditedDraft() {
-  const draft = editingDraft;
-  editingDraft = null;
+async function discardEditedDraft(draft) {
   if (!draft) return;
   try {
     await invoke("delete_message", {
@@ -4340,49 +4151,25 @@ async function discardEditedDraft() {
   li?.remove();
 }
 
-composeFormEl.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  composeErrorEl.textContent = "";
-  composeSendEl.disabled = true;
-  composeSendEl.textContent = "Sending…";
-  try {
-    await invoke("send_message", gatherComposeFields());
-    closeCompose();
-    await discardEditedDraft();
-  } catch (err) {
-    composeErrorEl.textContent = `${err}`;
-  } finally {
-    composeSendEl.disabled = false;
-    composeSendEl.textContent = "Send";
-  }
+// Emitted by a compose window (compose.js) after it successfully calls send_message /
+// save_draft itself - this window owns the mailbox-list DOM, so it's the one that reacts.
+window.__TAURI__.event.listen("mail-sent", async (event) => {
+  await discardEditedDraft(event.payload.editingDraft);
 });
 
-composeSaveDraftEl.addEventListener("click", async () => {
-  composeErrorEl.textContent = "";
-  composeSaveDraftEl.disabled = true;
-  composeSaveDraftEl.textContent = "Saving…";
-  try {
-    const fields = gatherComposeFields();
-    const wasEditingDraft = editingDraft !== null;
-    await invoke("save_draft", fields);
-    await discardEditedDraft();
-    closeCompose();
-    showToast("Draft saved", "success");
-    if (!wasEditingDraft) {
-      const drafts = (mailboxesByAccount[fields.account] ?? []).find((m) => m.special_usage === "Drafts");
-      if (drafts) {
-        const refreshed = await refreshMailboxView(fields.account, drafts.hash);
-        if (!refreshed && !unifiedActive && fields.account === activeAccount) {
-          adjustMailboxCounts(drafts.hash, 1, 0);
-          renderMailboxTabs();
-        }
+window.__TAURI__.event.listen("draft-saved", async (event) => {
+  const { fields, wasEditingDraft, editingDraft } = event.payload;
+  await discardEditedDraft(editingDraft);
+  showToast("Draft saved", "success");
+  if (!wasEditingDraft) {
+    const drafts = (mailboxesByAccount[fields.account] ?? []).find((m) => m.special_usage === "Drafts");
+    if (drafts) {
+      const refreshed = await refreshMailboxView(fields.account, drafts.hash);
+      if (!refreshed && !unifiedActive && fields.account === activeAccount) {
+        adjustMailboxCounts(drafts.hash, 1, 0);
+        renderMailboxTabs();
       }
     }
-  } catch (err) {
-    composeErrorEl.textContent = `${err}`;
-  } finally {
-    composeSaveDraftEl.disabled = false;
-    composeSaveDraftEl.textContent = "Save draft";
   }
 });
 

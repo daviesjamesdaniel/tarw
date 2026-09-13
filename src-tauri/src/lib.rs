@@ -34,6 +34,10 @@ struct AppState {
     // spawn_keepalive reconnect without re-reading+re-resolving the
     // registry file on every reconnect.
     providers: Mutex<std::collections::HashMap<String, ProviderConfig>>,
+    // Prefill data for a compose window, keyed by that window's label - handed off here
+    // rather than passed via the window's URL so an arbitrarily large quoted/forwarded
+    // message body never has to round-trip through a URL's length limits.
+    pending_compose: Mutex<std::collections::HashMap<String, serde_json::Value>>,
 }
 
 fn provider_for(state: &AppState, account: &str) -> melib::Result<ProviderConfig> {
@@ -779,6 +783,46 @@ fn list_accounts(app: tauri::AppHandle) -> Result<Vec<accounts::AccountRecord>, 
     accounts::load(&app).map_err(|e| e.to_string())
 }
 
+// The composer is a real OS window (resizable/maximizable/minimizable independently of
+// "main") rather than an in-page overlay, so it can't just read prefill data out of the
+// main window's DOM/JS state. Each open gets a uniquely labelled window and its prefill
+// is stashed here under that label; the compose window pulls it via take_pending_compose
+// once it has loaded and knows its own label.
+static COMPOSE_WINDOW_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[tauri::command]
+fn open_compose_window(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    title: String,
+    prefill: serde_json::Value,
+) -> Result<(), String> {
+    let n = COMPOSE_WINDOW_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let label = format!("compose-{n}");
+    state
+        .pending_compose
+        .lock()
+        .unwrap()
+        .insert(label.clone(), prefill);
+
+    tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App("compose.html".into()))
+        .title(title)
+        .inner_size(760.0, 680.0)
+        .min_inner_size(480.0, 400.0)
+        .resizable(true)
+        .maximizable(true)
+        .minimizable(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn take_pending_compose(state: tauri::State<AppState>, label: String) -> Option<serde_json::Value> {
+    state.pending_compose.lock().unwrap().remove(&label)
+}
+
 #[tauri::command]
 async fn remove_account(app: tauri::AppHandle, email: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -1153,7 +1197,9 @@ pub fn run() {
             check_for_update,
             app_version,
             test_imap_connection,
-            cancel_oauth_login
+            cancel_oauth_login,
+            open_compose_window,
+            take_pending_compose
         ])
         .setup(|app| {
             // Populate state.providers (and start watchers/keepalive) before the window/webview

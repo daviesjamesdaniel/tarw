@@ -1418,6 +1418,22 @@ body {
   animation: compose-panel-in 0.18s ease;
 }
 
+/* The email composer (compose.html) is its own OS window, sized/resized natively by the
+   window manager rather than centered as an in-page overlay like the other .compose-panel
+   modals (create-mailbox, remove-account, etc. - still overlays inside the main window). */
+.compose-standalone {
+  display: flex;
+}
+
+.compose-standalone .compose-panel {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+
 @keyframes compose-panel-in {
   from {
     opacity: 0;
