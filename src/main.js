@@ -1490,20 +1490,27 @@ function buildUpdateIndicator() {
 
 // Per-distro update snippets - kept in sync by hand with the equivalent
 // README sections (see packaging/deb, packaging/rpm, packaging/arch), since
-// there's no shared templating between the two. Each does a fresh clone
-// into /tmp rather than assuming an existing checkout location/state.
+// there's no shared templating between the two. Each does a fresh clone into
+// a freshly timestamped /tmp dir - not a fixed path - so running the update
+// command again later (a second time, or on a schedule) never fails on
+// "destination path already exists" from the previous run's leftover clone.
 const UPDATE_SNIPPETS = {
-  arch: `git clone https://github.com/daviesjamesdaniel/tarw.git /tmp/tarw-update
-cd /tmp/tarw-update/packaging/arch
+  arch: `TARW_DIR=/tmp/tarw-update-$(date +%s)
+git clone https://github.com/daviesjamesdaniel/tarw.git "$TARW_DIR"
+cd "$TARW_DIR/packaging/arch"
 makepkg -si`,
-  debian: `git clone https://github.com/daviesjamesdaniel/tarw.git /tmp/tarw-update
-cd /tmp/tarw-update
+  debian: `sudo apt install -y mold
+TARW_DIR=/tmp/tarw-update-$(date +%s)
+git clone https://github.com/daviesjamesdaniel/tarw.git "$TARW_DIR"
+cd "$TARW_DIR"
 cargo install cargo-deb --locked
 cd src-tauri
 cargo deb --locked
 sudo apt install ./target/debian/tarw_*.deb`,
-  fedora: `git clone https://github.com/daviesjamesdaniel/tarw.git /tmp/tarw-update
-cd /tmp/tarw-update
+  fedora: `sudo dnf install -y mold
+TARW_DIR=/tmp/tarw-update-$(date +%s)
+git clone https://github.com/daviesjamesdaniel/tarw.git "$TARW_DIR"
+cd "$TARW_DIR"
 cargo install cargo-generate-rpm --locked
 cd src-tauri
 cargo build --release --locked
