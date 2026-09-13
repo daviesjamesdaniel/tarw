@@ -67,7 +67,7 @@ jobs:
 
       - name: Build the .deb
         run: |
-          source "$HOME/.cargo/env"
+          . "$HOME/.cargo/env"
           cargo install cargo-deb --locked
           cd src-tauri
           cargo deb --locked
@@ -98,7 +98,7 @@ jobs:
 
       - name: Build the .rpm
         run: |
-          source "$HOME/.cargo/env"
+          . "$HOME/.cargo/env"
           cargo install cargo-generate-rpm --locked
           cd src-tauri
           cargo build --release --locked
