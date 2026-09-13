@@ -7,7 +7,7 @@ arch=('x86_64')
 url="https://github.com/daviesjamesdaniel/tarw"
 license=('GPL-3.0-or-later')
 depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'librsvg')
-makedepends=('rust' 'cargo')
+makedepends=('rust' 'cargo' 'mold')
 options=('!lto')
 
 # Local-only build for now: no source=() VCS fetch, builds directly from the
