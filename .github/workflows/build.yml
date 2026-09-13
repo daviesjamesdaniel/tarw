@@ -65,6 +65,14 @@ jobs:
       - name: Install Rust
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
+      # Every run was a fully clean build - ~600 dependencies recompiled from
+      # scratch every single time. This caches the registry, git checkouts,
+      # and target/ dir between runs, keyed on Cargo.lock - only genuinely
+      # changed/new dependencies need rebuilding on a cache hit.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
       - name: Build the .deb
         run: |
           . "$HOME/.cargo/env"
@@ -95,6 +103,10 @@ jobs:
 
       - name: Install Rust
         run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
 
       - name: Build the .rpm
         run: |
