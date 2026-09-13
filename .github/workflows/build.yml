@@ -1,0 +1,141 @@
+name: Build
+
+# Mirrors the exact commands documented in packaging/arch, packaging/deb, and
+# packaging/rpm - not a separate, parallel build path that could drift from
+# what a real user actually runs. Catches missing-dependency and packaging
+# regressions (e.g. a broken TOML key, a missing shared lib at install time)
+# before they reach a tagged release, rather than relying on someone
+# remembering to test all three distros by hand.
+# Day-to-day work pushes to dev, where this runs first; main only ever
+# receives merges from dev once it's green, so it stays release-ready. main
+# is still listed here too as a cheap extra safety net (e.g. a direct hotfix),
+# not because it's expected to be where problems get caught.
+on:
+  push:
+    branches: [dev, main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  arch:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git sudo
+
+      - uses: actions/checkout@v4
+
+      # makepkg refuses to run as root - create an unprivileged build user
+      # (standard pattern for Arch packaging in a container), give it
+      # passwordless sudo so `makepkg -s` can install its own makedepends,
+      # and hand it ownership of the checkout.
+      - name: Create build user
+        run: |
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+
+      - name: Build and install the package
+        run: sudo -u builder makepkg -si --noconfirm
+        working-directory: packaging/arch
+
+      - name: Verify the binary and its shared libraries resolve
+        run: |
+          test -x /usr/bin/tarw
+          ldd /usr/bin/tarw | grep -i "not found" && exit 1 || true
+
+  debian:
+    runs-on: ubuntu-latest
+    container: debian:bookworm
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            curl git build-essential pkg-config ca-certificates \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libssl-dev mold
+
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+      - name: Build the .deb
+        run: |
+          source "$HOME/.cargo/env"
+          cargo install cargo-deb --locked
+          cd src-tauri
+          cargo deb --locked
+
+      - name: Install the .deb
+        run: apt-get install -y ./src-tauri/target/debian/tarw_*.deb
+
+      - name: Verify the binary and its shared libraries resolve
+        run: |
+          test -x /usr/bin/tarw
+          ldd /usr/bin/tarw | grep -i "not found" && exit 1 || true
+
+  fedora:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Install build dependencies
+        run: |
+          dnf install -y \
+            curl git gcc pkgconf-pkg-config \
+            webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel \
+            librsvg2-devel openssl-devel rpm-build mold
+
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+      - name: Build the .rpm
+        run: |
+          source "$HOME/.cargo/env"
+          cargo install cargo-generate-rpm --locked
+          cd src-tauri
+          cargo build --release --locked
+          cargo generate-rpm
+
+      - name: Install the .rpm
+        run: dnf install -y ./src-tauri/target/generate-rpm/tarw-*.rpm
+
+      - name: Verify the binary and its shared libraries resolve
+        run: |
+          test -x /usr/bin/tarw
+          ldd /usr/bin/tarw | grep -i "not found" && exit 1 || true
+
+  # Only runs for a version tag push, and only once all three distro builds
+  # above have succeeded (GitHub Actions skips a job automatically if any of
+  # its `needs` fails) - a broken build on any distro stops the release
+  # before it's published, rather than relying on remembering to check.
+  publish-release:
+    needs: [arch, debian, fedora]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Reads the annotated tag's own message as the release title/notes (first
+      # line = title, rest = notes body) - written by hand at tag time same as
+      # always, e.g. `git tag -a v1.2.3 -m "v1.2.3 - Short title" -m "Fuller
+      # description of what changed."` (each -m becomes its own paragraph).
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          title="$(git for-each-ref "refs/tags/$tag" --format='%(contents:subject)')"
+          notes="$(git for-each-ref "refs/tags/$tag" --format='%(contents:body)')"
+          gh release create "$tag" --title "$title" --notes "$notes"
