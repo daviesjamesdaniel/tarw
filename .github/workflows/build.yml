@@ -202,6 +202,20 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      # fetch-depth:0 + fetch-tags:true still isn't enough (recurred on v0.3.7
+      # after already once being "fixed" for v0.3.6 - see below): actions/checkout
+      # correctly fetches the real annotated tag object first, then does its own
+      # second, "optimized" fetch keyed on the tag event's GITHUB_SHA - which
+      # GitHub sets to the underlying *commit* SHA for a tag push, not the tag
+      # object's SHA - and that second fetch silently overwrites refs/tags/$tag
+      # locally with a lightweight ref pointing straight at the commit. Confirmed
+      # via the actual checkout log for v0.3.7: `git fetch ... +<commit-sha>:refs/tags/$tag`
+      # ran right after the correct `+refs/tags/*:refs/tags/*` fetch. Re-fetching
+      # the tag by name (not by the SHA checkout already resolved) restores the
+      # real annotated object before it's read below.
+      - name: Re-fetch the annotated tag object
+        run: git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+
       # Reads the annotated tag's own message as the release title/notes (first
       # line = title, rest = notes body) - written by hand at tag time same as
       # always, e.g. `git tag -a v1.2.3 -m "v1.2.3 - Short title" -m "Fuller
@@ -213,4 +227,5 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           title="$(git for-each-ref "refs/tags/$tag" --format='%(contents:subject)')"
           notes="$(git for-each-ref "refs/tags/$tag" --format='%(contents:body)')"
-          gh release create "$tag" --title "$title" --notes "$notes"
+          gh release edit "$tag" --title "$title" --notes "$notes" 2>/dev/null \
+            || gh release create "$tag" --title "$title" --notes "$notes"
