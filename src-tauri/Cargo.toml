@@ -35,7 +35,7 @@ serde_json = "1"
 # not yet merged into melib's actual master - each one gets dropped from
 # that fork as it lands upstream for real, so this fork is meant to shrink
 # to nothing over time, not grow. See its README for what's on top and why.
-melib = { git = "https://github.com/daviesjamesdaniel/melib-tarw-patches.git", rev = "225fddc318f473996b4b71187577eaa77447273e", features = ["sqlite3"] }
+melib = { git = "https://github.com/daviesjamesdaniel/melib-tarw-patches.git", rev = "8db03246dc843086e3753c130a8b4b0f7ff40d54", features = ["sqlite3"] }
 indexmap = "2"
 # Same version melib itself depends on - used to compute the exact path to
 # melib's own on-disk mailbox/message cache (see imap_client::remove_account_data),

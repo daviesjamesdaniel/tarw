@@ -2506,11 +2506,11 @@ dependencies = [
 [[package]]
 name = "melib"
 version = "0.8.13"
-source = "git+https://github.com/daviesjamesdaniel/melib-tarw-patches.git?rev=225fddc318f473996b4b71187577eaa77447273e#225fddc318f473996b4b71187577eaa77447273e"
+source = "git+https://github.com/daviesjamesdaniel/melib-tarw-patches.git?rev=8db03246dc843086e3753c130a8b4b0f7ff40d54#8db03246dc843086e3753c130a8b4b0f7ff40d54"
 dependencies = [
  "async-fn-stream",
  "async-io",
- "base64 0.22.1",
+ "base64 0.21.7",
  "bitflags 2.13.1",
  "cfg-if",
  "chrono",
