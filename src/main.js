@@ -1516,6 +1516,11 @@ cd src-tauri
 cargo build --release --locked
 cargo generate-rpm
 sudo dnf install ./target/generate-rpm/tarw-*.rpm`,
+  // Unlike the other tabs, this doesn't need a local clone first - flakes
+  // can build straight from a GitHub ref. --refresh re-fetches main rather
+  // than reusing eval cache, so re-running this later always picks up the
+  // latest version, same intent as the other tabs' fresh-clone-every-time.
+  nix: `nix profile install github:daviesjamesdaniel/tarw --refresh`,
 };
 
 let updateModalDistro = "arch";

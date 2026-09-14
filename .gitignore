@@ -30,3 +30,7 @@ vendor/melib-0.8.13/target/
 
 # Local-only clone of meli used for preparing upstream PRs - not part of this project
 upstream-prep/
+
+# `nix build` output symlink
+result
+result-*
