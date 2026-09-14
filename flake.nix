@@ -73,20 +73,29 @@
         version = "0.3.7";
       };
 
-      # Deliberately no separate `buildDepsOnly`/cargoArtifacts split here -
-      # tauri's own build script bakes the sandbox's absolute OUT_DIR path
-      # into a generated permissions manifest, which breaks when that target
-      # dir gets decompressed into a *different* sandbox path for the final
-      # buildPackage derivation (each Nix build gets a fresh /nix/var/nix/builds/...
-      # path). A single-phase build sidesteps it; repeat CI runs on unchanged
-      # source still get a full binary-cache hit via magic-nix-cache, so this
-      # only costs a full rebuild when something actually changed anyway.
+      # Real caching restored, 2026-09-14 (see project memory): confirmed via
+      # a real CI run that Cachix substitution itself was working fine (only
+      # tarw's own final derivation ever rebuilt, all ~900 dependency/nixpkgs
+      # derivations substituted) - the ~13min wall time was entirely the
+      # `cargo build` compile step inside that one derivation, uncached every
+      # run because cargoArtifacts was disabled below. Re-enabling it caches
+      # every dependency crate's compiled .rlib; the targeted preBuild rm
+      # below handles just the one crate (tauri) whose build script doesn't
+      # survive the swap to a different sandbox path.
+      cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
       tarw = craneLib.buildPackage (commonArgs // {
-        # Explicitly null, not just omitted - buildPackage computes its own
-        # default cargoArtifacts (still a two-phase build) unless told not
-        # to, which would silently reintroduce the OUT_DIR staleness bug
-        # explained above.
-        cargoArtifacts = null;
+        inherit cargoArtifacts;
+
+        # tauri's build script bakes the sandbox's absolute OUT_DIR path into
+        # a generated permissions manifest, which breaks once cargoArtifacts'
+        # target dir is decompressed into a *different* sandbox path for this
+        # derivation. Deleting just tauri's own stale build output forces its
+        # script to rerun fresh here - every other crate's cached .rlib in
+        # cargoArtifacts is untouched and still reused.
+        preBuild = ''
+          rm -rf target/release/build/tauri-*
+        '';
 
         # Same desktop entry / icon already shipped in the deb and rpm
         # packages - kept as the one source of truth rather than
