@@ -70,7 +70,7 @@
         # 2026-09-14.
         sourceRoot = "source/src-tauri";
         pname = "tarw";
-        version = "0.3.6";
+        version = "0.3.7";
       };
 
       # Deliberately no separate `buildDepsOnly`/cargoArtifacts split here -
