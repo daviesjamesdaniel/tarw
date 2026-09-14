@@ -156,11 +156,20 @@ jobs:
 
       - uses: DeterminateSystems/nix-installer-action@main
 
-      # Free, GitHub-hosted binary cache for this repo's own build outputs -
-      # same purpose as Swatinem/rust-cache above (avoid re-fetching/re-building
-      # unchanged dependencies every run), just the Nix-native equivalent
-      # rather than a raw actions/cache wrapper around ~/.cargo.
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+      # Binary cache for this repo's own build outputs - same purpose as
+      # Swatinem/rust-cache above (avoid re-fetching/re-building unchanged
+      # dependencies every run), just the Nix-native equivalent. Switched
+      # from DeterminateSystems/magic-nix-cache-action (2026-09-14): its
+      # GitHub-Actions-Cache-backed fallback got rate-limited on the very
+      # first run ("GitHub Actions Cache throttled Magic Nix Cache"),
+      # likely from contention with the other three jobs' own rust-cache
+      # use, so it never actually cached anything. Cache is public - lets
+      # end users' `nix profile install` (see the update modal) benefit
+      # from it too, not just CI.
+      - uses: cachix/cachix-action@v14
+        with:
+          name: tarw
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Build
         run: nix build --print-build-logs

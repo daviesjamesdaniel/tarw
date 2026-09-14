@@ -6,6 +6,15 @@
     crane.url = "github:ipetkov/crane";
   };
 
+  # Advertises the public Cachix cache CI pushes to (see .github/workflows/build.yml)
+  # so `nix build`/`nix profile install` against this flake offers to use it instead
+  # of building from source - Nix prompts a one-time accept for an untrusted flake's
+  # nixConfig, or a user with `accept-flake-config = true` picks it up silently.
+  nixConfig = {
+    extra-substituters = [ "https://tarw.cachix.org" ];
+    extra-trusted-public-keys = [ "tarw.cachix.org-1:s8iNCabSLG4p9F/KEDtgN6A6sG8rKdbfRn/KrVJA2tk=" ];
+  };
+
   outputs = { self, nixpkgs, crane }:
     let
       system = "x86_64-linux";
@@ -28,7 +37,11 @@
         ];
       };
 
-      nativeBuildInputs = with pkgs; [ pkg-config wrapGAppsHook3 ];
+      # mold speeds up the link step (see src-tauri/build.rs) - it's an
+      # optional auto-detected dependency there (silent fallback to the
+      # default linker if absent), same as the other three distros'
+      # packaging, so it belongs here rather than as a hard requirement.
+      nativeBuildInputs = with pkgs; [ pkg-config wrapGAppsHook3 mold ];
 
       # Same set proven working against tarw's real ~600-crate dependency
       # tree, 2026-09-14 - see project memory for how this was verified
