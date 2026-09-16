@@ -1151,7 +1151,7 @@ async function markAllRead(mailbox) {
     for (const row of cached) row.is_seen = true;
     persistMailboxMessagesCache();
   }
-  adjustMailboxCounts(mailbox.hash, 0, -mailbox.unread);
+  adjustMailboxCounts(activeAccount, mailbox.hash, 0, -mailbox.unread);
   renderMailboxTabs();
   if (currentMailboxHash === mailbox.hash) {
     if (cached) renderMessageRows(cached);
@@ -1270,7 +1270,7 @@ emptyMailboxFormEl.addEventListener("submit", async (e) => {
 
       mailboxMessagesCache.set(mailboxCacheKey(activeAccount, mailbox.hash), []);
       persistMailboxMessagesCache();
-      adjustMailboxCounts(mailbox.hash, -mailbox.total, -mailbox.unread);
+      adjustMailboxCounts(activeAccount, mailbox.hash, -mailbox.total, -mailbox.unread);
       renderMailboxTabs();
       if (currentMailboxHash === mailbox.hash) {
         renderMessageRows([]);
@@ -3498,7 +3498,17 @@ async function setSeenState(row, li, value) {
   }
   unreadCount += value ? -1 : 1;
   currentMailboxOwnUnread += value ? -1 : 1;
+  // Also update the specific mailbox's own unread count (what tab badges
+  // actually render from - see mailboxBadgeCount()/renderMailboxTabs()),
+  // not just the global scalars above. syncCurrentMailboxUnreadBadge()
+  // (called via updateStatus() below) patches the active tab's badge
+  // directly for the non-unified case, but is a no-op when unifiedActive,
+  // so the unified tab bar needs an explicit re-render here too - without
+  // it, a read/unread toggle only reaches the visible badge whenever
+  // something else happens to trigger one (a poll, switching mailboxes).
+  adjustMailboxCounts(row.account, row.mailboxHash, 0, value ? -1 : 1);
   updateStatus();
+  if (unifiedActive) renderUnifiedTabs();
   try {
     await invoke("set_seen", {
       account: row.account,
@@ -3515,7 +3525,9 @@ async function setSeenState(row, li, value) {
     }
     unreadCount += value ? 1 : -1;
     currentMailboxOwnUnread += value ? 1 : -1;
+    adjustMailboxCounts(row.account, row.mailboxHash, 0, value ? 1 : -1);
     updateStatus();
+    if (unifiedActive) renderUnifiedTabs();
     throw err;
   }
 }
@@ -3546,8 +3558,13 @@ async function deleteMessage(row, li) {
     unreadCount -= 1;
     currentMailboxOwnUnread -= 1;
   }
-  adjustMailboxCounts(row.mailboxHash, -1, row.is_seen ? 0 : -1);
+  adjustMailboxCounts(row.account, row.mailboxHash, -1, row.is_seen ? 0 : -1);
   updateStatus();
+  // Same reasoning as setSeenState() - the unified tab bar has no
+  // equivalent to syncCurrentMailboxUnreadBadge()'s direct active-tab
+  // patch, so it needs an explicit re-render here or the badge only
+  // catches up whenever something else happens to trigger one.
+  if (unifiedActive) renderUnifiedTabs();
   if (li.classList.contains("selected")) {
     showEmptyReadingPane();
   }
@@ -3662,8 +3679,9 @@ function closeMoveMenuOnOutsideClick(e) {
   if (moveMenuEl && !moveMenuEl.contains(e.target)) closeMoveMenu();
 }
 
-function adjustMailboxCounts(mailboxHash, deltaTotal, deltaUnread) {
-  const mailbox = mailboxes.find((m) => m.hash === mailboxHash);
+function adjustMailboxCounts(account, mailboxHash, deltaTotal, deltaUnread) {
+  const list = mailboxesByAccount[account] ?? mailboxes;
+  const mailbox = list.find((m) => m.hash === mailboxHash);
   if (!mailbox) return;
   mailbox.total = Math.max(0, mailbox.total + deltaTotal);
   mailbox.unread = Math.max(0, mailbox.unread + deltaUnread);
@@ -3694,9 +3712,10 @@ async function moveMessage(row, li, sourceMailboxHash, destinationMailboxHash) {
   li.remove();
   removeFromSearchResults(row);
 
-  adjustMailboxCounts(sourceMailboxHash, -1, row.is_seen ? 0 : -1);
-  adjustMailboxCounts(destinationMailboxHash, 1, row.is_seen ? 0 : 1);
-  if (!unifiedActive) renderMailboxTabs();
+  adjustMailboxCounts(row.account, sourceMailboxHash, -1, row.is_seen ? 0 : -1);
+  adjustMailboxCounts(row.account, destinationMailboxHash, 1, row.is_seen ? 0 : 1);
+  if (unifiedActive) renderUnifiedTabs();
+  else renderMailboxTabs();
 }
 
 function rowIsDraft(row) {
@@ -4154,7 +4173,7 @@ async function discardEditedDraft(draft) {
   if (!unifiedActive && draft.account === activeAccount) {
     const drafts = mailboxes.find((m) => m.special_usage === "Drafts");
     if (drafts) {
-      adjustMailboxCounts(drafts.hash, -1, 0);
+      adjustMailboxCounts(draft.account, drafts.hash, -1, 0);
       renderMailboxTabs();
     }
   }
@@ -4178,7 +4197,7 @@ window.__TAURI__.event.listen("draft-saved", async (event) => {
     if (drafts) {
       const refreshed = await refreshMailboxView(fields.account, drafts.hash);
       if (!refreshed && !unifiedActive && fields.account === activeAccount) {
-        adjustMailboxCounts(drafts.hash, 1, 0);
+        adjustMailboxCounts(fields.account, drafts.hash, 1, 0);
         renderMailboxTabs();
       }
     }
