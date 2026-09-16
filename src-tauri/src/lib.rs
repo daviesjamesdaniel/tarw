@@ -38,6 +38,12 @@ struct AppState {
     // rather than passed via the window's URL so an arbitrarily large quoted/forwarded
     // message body never has to round-trip through a URL's length limits.
     pending_compose: Mutex<std::collections::HashMap<String, serde_json::Value>>,
+    // OS notification ID for a still-showing new-mail notification, keyed by
+    // (account, envelope hash) - lets clear_notification_for_message close it
+    // early once the message has been read or deleted in-app, rather than
+    // leaving it sitting in the notification center for a message the user
+    // has already dealt with.
+    pending_notifications: Mutex<std::collections::HashMap<(String, String), u32>>,
 }
 
 fn provider_for(state: &AppState, account: &str) -> melib::Result<ProviderConfig> {
@@ -495,6 +501,40 @@ async fn open_attachment(
     .map_err(|e| e.to_string())?
 }
 
+// Closes a still-showing new-mail notification for a message that's just
+// been read or deleted in-app, so it doesn't sit in the notification center
+// for something the user has already dealt with without clicking it. A
+// no-op if there's no tracked notification for this (account, hash) - most
+// calls hit that case, since most opened/deleted messages were never
+// notified about in the first place.
+#[tauri::command]
+async fn clear_notification_for_message(app: tauri::AppHandle, account: String, hash: String) {
+    let id = app
+        .state::<AppState>()
+        .pending_notifications
+        .lock()
+        .unwrap()
+        .remove(&(account, hash));
+    let Some(id) = id else {
+        return;
+    };
+    // notify-rust's own NotificationHandle::close() can't be reused here - it
+    // consumes self, and the handle that created this notification is
+    // already moved into wait_for_action() by this point. CloseNotification
+    // only needs the ID, so a direct D-Bus call is simplest.
+    if let Ok(conn) = zbus::Connection::session().await {
+        let _ = conn
+            .call_method(
+                Some("org.freedesktop.Notifications"),
+                "/org/freedesktop/Notifications",
+                Some("org.freedesktop.Notifications"),
+                "CloseNotification",
+                &(id,),
+            )
+            .await;
+    }
+}
+
 #[tauri::command]
 async fn set_seen(
     app: tauri::AppHandle,
@@ -700,7 +740,7 @@ async fn send_message(
     attachment_source_hash: String,
     attachment_indices: Vec<usize>,
 ) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let send = tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let attachments = resolve_outgoing_attachments(
             &state,
@@ -725,9 +765,17 @@ async fn send_message(
             &provider,
         )
         .map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    });
+    // melib's SmtpServerConf has no timeout field of its own, so a stalled
+    // connect/handshake, or a stalled OAuth2 token refresh ahead of it, would
+    // otherwise hang this JoinHandle forever - the compose window's
+    // "Sending..." would never resolve or error, no matter how long the user
+    // waited. The blocking thread itself can't be cancelled and keeps running
+    // in the background, but this at least bounds how long the UI waits on it.
+    match tokio::time::timeout(std::time::Duration::from_secs(30), send).await {
+        Ok(result) => result.map_err(|e| e.to_string())?,
+        Err(_) => Err("Timed out sending message - check your network connection and try again".to_string()),
+    }
 }
 
 #[tauri::command]
@@ -1079,10 +1127,31 @@ fn spawn_watcher(
                     .body(&subject)
                     .sound_name("message-new-email")
                     .icon(concat!(env!("CARGO_MANIFEST_DIR"), "/icons/128x128.png"))
+                    // Without a declared action, most notification servers (confirmed
+                    // live against swaync) treat a click on the body as a plain dismiss
+                    // - NotificationClosed, no ActionInvoked - so wait_for_action's
+                    // closure below never sees anything but "__closed" and the
+                    // click-to-open never fires. Declaring "default" is the
+                    // freedesktop-spec convention for "the body itself is clickable".
+                    .action("default", "Open")
                     .show();
                 if let Ok(notif_handle) = notification {
+                    {
+                        let state = click_handle.state::<AppState>();
+                        state.pending_notifications.lock().unwrap().insert(
+                            (account_for_click.clone(), hash_for_click.clone()),
+                            notif_handle.id(),
+                        );
+                    }
+                    let tracking_key = (account_for_click.clone(), hash_for_click.clone());
                     std::thread::spawn(move || {
                         notif_handle.wait_for_action(|action| {
+                            click_handle
+                                .state::<AppState>()
+                                .pending_notifications
+                                .lock()
+                                .unwrap()
+                                .remove(&tracking_key);
                             if action == "__closed" {
                                 return;
                             }
@@ -1199,7 +1268,8 @@ pub fn run() {
             test_imap_connection,
             cancel_oauth_login,
             open_compose_window,
-            take_pending_compose
+            take_pending_compose,
+            clear_notification_for_message
         ])
         .setup(|app| {
             // Populate state.providers (and start watchers/keepalive) before the window/webview

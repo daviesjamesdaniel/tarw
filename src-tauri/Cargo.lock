@@ -4551,7 +4551,9 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "tokio",
  "xdg",
+ "zbus",
 ]
 
 [[package]]

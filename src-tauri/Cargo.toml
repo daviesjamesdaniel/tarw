@@ -63,6 +63,20 @@ tauri-plugin-notification = "2"
 # clicked). Pinned to the exact version tauri-plugin-notification already
 # pulls in (see Cargo.lock) so both use the same build, not two copies.
 notify-rust = "=4.18.0"
+# Used directly to close a still-showing new-mail notification by ID once
+# its message has been read or deleted in-app (notify-rust's own handle
+# can't be reused for this - see the CloseNotification call site). Pinned
+# to the version already resolved transitively (see Cargo.lock) so this
+# doesn't pull in a second copy.
+zbus = "=5.19.0"
+# Used directly (just the "time" feature) to bound send_message's blocking
+# SMTP call with an outer timeout - melib's SmtpServerConf has no timeout
+# field of its own, so a stalled connect/handshake/OAuth refresh would
+# otherwise hang spawn_blocking's JoinHandle forever, leaving the compose
+# window stuck on "Sending..." with no error. Pinned to the version
+# already resolved transitively (see Cargo.lock) so this doesn't pull in a
+# second copy.
+tokio = { version = "=1.53.1", features = ["time"] }
 
 # cargo-deb reads this directly to produce packaging/deb's .deb - see that
 # directory's README for the build command. Runtime deps mirror

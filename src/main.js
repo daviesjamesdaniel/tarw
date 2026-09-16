@@ -3553,6 +3553,7 @@ async function deleteMessage(row, li) {
     showErrorToast(`Couldn't delete message: ${err}`);
     return;
   }
+  invoke("clear_notification_for_message", { account: row.account, hash: row.hash }).catch(() => {});
   totalCount -= 1;
   if (!row.is_seen) {
     unreadCount -= 1;
@@ -3757,6 +3758,8 @@ async function openMessage(row, li) {
     .querySelectorAll(".inbox-row.selected, .search-grid-row.selected")
     .forEach((el) => el.classList.remove("selected"));
   li.classList.add("selected");
+
+  invoke("clear_notification_for_message", { account: row.account, hash: row.hash }).catch(() => {});
 
   if (!row.is_seen) {
     setSeenState(row, li, true).catch((err) => {

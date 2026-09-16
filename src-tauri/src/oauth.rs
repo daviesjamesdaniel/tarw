@@ -41,6 +41,10 @@ fn http_client() -> melib::Result<reqwest::blocking::Client> {
         // Never follow redirects on a token/auth exchange - a malicious/compromised auth server
         // could otherwise redirect the request (carrying the code/token) to an arbitrary URL.
         .redirect(reqwest::redirect::Policy::none())
+        // Without this, a stalled token endpoint or network blip hangs the request forever -
+        // this runs inside send_message's spawn_blocking, so a hang here means the compose
+        // window's "Sending..." never resolves or errors, no matter how long the user waits.
+        .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|e| err(format!("Could not build HTTP client: {e}")))
 }

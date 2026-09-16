@@ -5,6 +5,7 @@
   "windows": ["main", "compose-*"],
   "permissions": [
     "core:default",
+    "core:window:allow-close",
     "opener:default",
     "dialog:default",
     "notification:default"
