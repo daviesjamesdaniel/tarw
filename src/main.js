@@ -3246,7 +3246,12 @@ async function runSearch(query) {
           if (searchQuery !== thisSearchQuery) return;
           searchResults = liveRows.filter((row) => matchesQuery(row, parsed));
           sortSearchResults();
-          renderSearchTabAndGrid();
+          // Only actually re-show the grid if the user is still looking at
+          // it - a background per-mailbox fetch resolving after the user
+          // has already clicked into a result (leaving the search view)
+          // would otherwise yank them back to Search Results out from
+          // under whatever they navigated to, mid-navigation.
+          if (!searchResultsEl.hidden) renderSearchTabAndGrid();
         });
       })
       .catch((err) => {
