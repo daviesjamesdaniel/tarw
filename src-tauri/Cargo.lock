@@ -2506,7 +2506,7 @@ dependencies = [
 [[package]]
 name = "melib"
 version = "0.8.13"
-source = "git+https://github.com/daviesjamesdaniel/melib-tarw-patches.git?rev=8db03246dc843086e3753c130a8b4b0f7ff40d54#8db03246dc843086e3753c130a8b4b0f7ff40d54"
+source = "git+https://github.com/daviesjamesdaniel/melib-tarw-patches.git?rev=2a91209140e3ec2cb8bd98dc78723ea13a1d1b06#2a91209140e3ec2cb8bd98dc78723ea13a1d1b06"
 dependencies = [
  "async-fn-stream",
  "async-io",
