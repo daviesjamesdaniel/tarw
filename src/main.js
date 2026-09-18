@@ -3740,6 +3740,16 @@ async function editDraft(row) {
       bodyHtml: draft.is_html ? draft.body : `<p>${escapeHtml(draft.body)}</p>`,
       references: draft.references,
       editingDraft: { account: row.account, hash: row.hash, mailboxHash: row.mailboxHash },
+      // The draft's own attachments, if any - reuses the same
+      // fetch-live-from-IMAP-by-index mechanism as a real forward, just
+      // pointed at the draft message itself as the "source" instead of a
+      // different original message. No confirm-include prompt here,
+      // unlike forwarding - editing your own draft should obviously keep
+      // whatever's already attached to it.
+      forwardAttachments:
+        draft.attachments.length > 0
+          ? { sourceHash: row.hash, sourceAccount: row.account, attachments: draft.attachments }
+          : null,
     });
   } catch (err) {
     console.error("Failed to load draft", err);
@@ -4178,12 +4188,11 @@ async function discardEditedDraft(draft) {
   }
   const refreshed = await refreshMailboxView(draft.account, draft.mailboxHash);
   if (refreshed) return;
-  if (!unifiedActive && draft.account === activeAccount) {
-    const drafts = mailboxes.find((m) => m.special_usage === "Drafts");
-    if (drafts) {
-      adjustMailboxCounts(draft.account, drafts.hash, -1, 0);
-      renderMailboxTabs();
-    }
+  const drafts = (mailboxesByAccount[draft.account] ?? []).find((m) => m.special_usage === "Drafts");
+  if (drafts) {
+    adjustMailboxCounts(draft.account, drafts.hash, -1, 0);
+    if (unifiedActive) renderUnifiedTabs();
+    else if (draft.account === activeAccount) renderMailboxTabs();
   }
   const li =
     listEl.querySelector(`[data-hash="${draft.hash}"]`) ?? pinnedListEl.querySelector(`[data-hash="${draft.hash}"]`);
@@ -4204,9 +4213,10 @@ window.__TAURI__.event.listen("draft-saved", async (event) => {
     const drafts = (mailboxesByAccount[fields.account] ?? []).find((m) => m.special_usage === "Drafts");
     if (drafts) {
       const refreshed = await refreshMailboxView(fields.account, drafts.hash);
-      if (!refreshed && !unifiedActive && fields.account === activeAccount) {
+      if (!refreshed) {
         adjustMailboxCounts(fields.account, drafts.hash, 1, 0);
-        renderMailboxTabs();
+        if (unifiedActive) renderUnifiedTabs();
+        else if (fields.account === activeAccount) renderMailboxTabs();
       }
     }
   }

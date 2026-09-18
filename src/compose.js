@@ -27,6 +27,13 @@ let editingDraft = null;
 let composeInReplyTo = "";
 let composeReferences = "";
 let composeForwardAttachments = null;
+// Freshly-picked/dropped local files staged for this message, distinct
+// from composeForwardAttachments (attachments carried over from an
+// original message being forwarded, fetched live from the IMAP server
+// rather than the local filesystem). Both render into the same bar and
+// both end up in the same outgoing attachment list, just via different
+// Tauri commands - see gatherComposeFields()/resolve_outgoing_attachments.
+let composeLocalAttachments = [];
 const recipientAddressBook = new Map();
 
 function escapeHtml(s) {
@@ -234,33 +241,86 @@ function placeComposeCaretAtStart() {
   win.focus();
 }
 
+function buildAttachmentChip({ filename, size, onClick, onRemove }) {
+  const chip = document.createElement("div");
+  chip.className = "attachment-chip";
+  chip.title = onClick ? `Open ${filename}` : filename;
+  chip.innerHTML = `<span class="attachment-chip-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05 12.25 20.24a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
+    <span class="attachment-chip-name">${escapeHtml(filename)}</span>
+    <span class="attachment-chip-size">${formatFileSize(size)}</span>
+    <button class="attachment-chip-remove" type="button" title="Remove">&times;</button>`;
+  if (onClick) chip.addEventListener("click", onClick);
+  chip.querySelector(".attachment-chip-remove").addEventListener("click", (e) => {
+    e.stopPropagation();
+    onRemove();
+  });
+  return chip;
+}
+
 function renderComposeAttachmentsBar() {
   composeAttachmentsBarEl.innerHTML = "";
-  if (!composeForwardAttachments || composeForwardAttachments.attachments.length === 0) {
-    composeAttachmentsBarEl.hidden = true;
-    return;
+  const forwarded = composeForwardAttachments?.attachments ?? [];
+  const hasAny = forwarded.length > 0 || composeLocalAttachments.length > 0;
+  composeAttachmentsBarEl.hidden = !hasAny;
+  if (!hasAny) return;
+
+  const { sourceHash, sourceAccount } = composeForwardAttachments ?? {};
+  for (const att of forwarded) {
+    composeAttachmentsBarEl.appendChild(
+      buildAttachmentChip({
+        filename: att.filename,
+        size: att.size,
+        onClick: () => openAttachment(sourceAccount, sourceHash, att.index),
+        onRemove: () => {
+          composeForwardAttachments.attachments = composeForwardAttachments.attachments.filter(
+            (a) => a.index !== att.index,
+          );
+          renderComposeAttachmentsBar();
+        },
+      }),
+    );
   }
-  composeAttachmentsBarEl.hidden = false;
-  const { sourceHash, sourceAccount, attachments } = composeForwardAttachments;
-  for (const att of attachments) {
-    const chip = document.createElement("div");
-    chip.className = "attachment-chip";
-    chip.title = `Open ${att.filename}`;
-    chip.innerHTML = `<span class="attachment-chip-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05 12.25 20.24a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></span>
-      <span class="attachment-chip-name">${escapeHtml(att.filename)}</span>
-      <span class="attachment-chip-size">${formatFileSize(att.size)}</span>
-      <button class="attachment-chip-remove" type="button" title="Remove">&times;</button>`;
-    chip.addEventListener("click", () => openAttachment(sourceAccount, sourceHash, att.index));
-    chip.querySelector(".attachment-chip-remove").addEventListener("click", (e) => {
-      e.stopPropagation();
-      composeForwardAttachments.attachments = composeForwardAttachments.attachments.filter(
-        (a) => a.index !== att.index,
-      );
-      renderComposeAttachmentsBar();
-    });
-    composeAttachmentsBarEl.appendChild(chip);
+  for (const att of composeLocalAttachments) {
+    composeAttachmentsBarEl.appendChild(
+      buildAttachmentChip({
+        filename: att.filename,
+        size: att.size,
+        onRemove: () => {
+          composeLocalAttachments = composeLocalAttachments.filter((a) => a !== att);
+          renderComposeAttachmentsBar();
+        },
+      }),
+    );
   }
 }
+
+async function attachLocalFile(path) {
+  try {
+    const info = await invoke("read_attachment_file", { path });
+    composeLocalAttachments.push(info);
+    renderComposeAttachmentsBar();
+  } catch (err) {
+    console.error("read_attachment_file failed", err);
+    composeErrorEl.textContent = `Couldn't attach file: ${err}`;
+  }
+}
+
+document.getElementById("compose-attach-button").addEventListener("click", async () => {
+  const selected = await window.__TAURI__.dialog.open({ multiple: true });
+  if (!selected) return;
+  const paths = Array.isArray(selected) ? selected : [selected];
+  for (const path of paths) {
+    await attachLocalFile(path);
+  }
+});
+
+currentWindow.onDragDropEvent((event) => {
+  if (event.payload.type === "drop") {
+    for (const path of event.payload.paths) {
+      attachLocalFile(path);
+    }
+  }
+});
 
 function revealComposeField(fieldEl, toggleEl, inputEl) {
   fieldEl.hidden = false;
@@ -295,6 +355,11 @@ function gatherComposeFields() {
     references: composeReferences,
     attachmentSourceHash: composeForwardAttachments?.sourceHash ?? "",
     attachmentIndices: composeForwardAttachments?.attachments.map((a) => a.index) ?? [],
+    localAttachments: composeLocalAttachments.map((a) => ({
+      filename: a.filename,
+      mimeType: a.mime_type,
+      bytesBase64: a.bytes_base64,
+    })),
   };
 }
 

@@ -7,7 +7,7 @@ mod smtp_client;
 
 use melib::imap::ImapType;
 use providers::ProviderConfig;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::{
     image::Image,
@@ -698,12 +698,22 @@ async fn move_message(
     .map_err(|e| e.to_string())?
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalAttachmentInput {
+    filename: String,
+    mime_type: String,
+    bytes_base64: String,
+}
+
 fn resolve_outgoing_attachments(
     state: &AppState,
     account: &str,
     attachment_source_hash: &str,
     attachment_indices: Vec<usize>,
+    local_attachments: Vec<LocalAttachmentInput>,
 ) -> Result<Vec<smtp_client::OutgoingAttachment>, String> {
+    use base64::Engine;
     let mut attachments = Vec::new();
     if !attachment_source_hash.is_empty() {
         let hash: u64 = attachment_source_hash
@@ -722,7 +732,53 @@ fn resolve_outgoing_attachments(
             });
         }
     }
+    for local in local_attachments {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&local.bytes_base64)
+            .map_err(|e| e.to_string())?;
+        attachments.push(smtp_client::OutgoingAttachment {
+            filename: local.filename,
+            mime_type: local.mime_type,
+            bytes,
+        });
+    }
     Ok(attachments)
+}
+
+#[derive(Serialize)]
+struct AttachmentFileInfo {
+    filename: String,
+    mime_type: String,
+    size: u64,
+    bytes_base64: String,
+}
+
+// Reads a local file the user picked (via the file dialog or an OS
+// drag-drop onto the compose window) so it can be staged as an outgoing
+// attachment. Runs on a blocking thread since file I/O for a large
+// attachment shouldn't block the async runtime.
+#[tauri::command]
+async fn read_attachment_file(path: String) -> Result<AttachmentFileInfo, String> {
+    use base64::Engine;
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = std::path::Path::new(&path);
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let filename = path
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| "attachment".to_string());
+        let mime_type = mime_guess::from_path(path)
+            .first_or_octet_stream()
+            .to_string();
+        Ok(AttachmentFileInfo {
+            filename,
+            mime_type,
+            size: bytes.len() as u64,
+            bytes_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -739,6 +795,7 @@ async fn send_message(
     references: String,
     attachment_source_hash: String,
     attachment_indices: Vec<usize>,
+    local_attachments: Vec<LocalAttachmentInput>,
 ) -> Result<(), String> {
     let send = tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
@@ -747,6 +804,7 @@ async fn send_message(
             &account,
             &attachment_source_hash,
             attachment_indices,
+            local_attachments,
         )?;
         let provider = provider_for(&state, &account).map_err(|e| e.to_string())?;
         smtp_client::send(
@@ -792,6 +850,7 @@ async fn save_draft(
     references: String,
     attachment_source_hash: String,
     attachment_indices: Vec<usize>,
+    local_attachments: Vec<LocalAttachmentInput>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
@@ -800,6 +859,7 @@ async fn save_draft(
             &account,
             &attachment_source_hash,
             attachment_indices,
+            local_attachments,
         )?;
         let raw = smtp_client::build_raw(
             &smtp_client::OutgoingMessage {
@@ -1269,7 +1329,8 @@ pub fn run() {
             cancel_oauth_login,
             open_compose_window,
             take_pending_compose,
-            clear_notification_for_message
+            clear_notification_for_message,
+            read_attachment_file
         ])
         .setup(|app| {
             // Populate state.providers (and start watchers/keepalive) before the window/webview

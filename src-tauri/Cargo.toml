@@ -54,6 +54,10 @@ oauth2 = { version = "5.0.0", features = ["reqwest-blocking"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
 keyring = { version = "4.1.6", features = ["v1", "dbus-secret-service-keyring-store"] }
 base64 = "0.23.1"
+# Used to guess a local file's MIME type from its extension when attaching
+# it to an outgoing message - melib itself has no equivalent (it only
+# parses MIME types out of already-received messages).
+mime_guess = "2"
 tauri-plugin-dialog = "2.7.2"
 tauri-plugin-notification = "2"
 # Used directly (alongside the plugin above) only for the new-mail
