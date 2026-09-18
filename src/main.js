@@ -1605,7 +1605,11 @@ async function toggleSettingsPanel() {
     </div>
     <div class="settings-panel-account-list" id="settings-account-list"></div>
     <div class="settings-panel-footer">
-      <span class="settings-panel-version">${currentAppVersion ? `v${escapeHtml(currentAppVersion)}` : ""}</span>
+      ${
+        currentAppVersion
+          ? `<a href="https://github.com/daviesjamesdaniel/tarw/releases/tag/v${escapeHtml(currentAppVersion)}" class="settings-panel-version" title="View changelog for this version">v${escapeHtml(currentAppVersion)}</a>`
+          : `<span class="settings-panel-version"></span>`
+      }
       <a href="https://buymeacoffee.com/tarw" class="settings-panel-coffee-link" title="Buy me a coffee" aria-label="Buy me a coffee">${ICONS.coffee}</a>
     </div>`;
   settingsPanelEl = panel;
