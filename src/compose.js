@@ -167,9 +167,6 @@ function initComposeBodyDoc() {
       "</style></head><body contenteditable=\"true\"></body></html>",
   );
   doc.close();
-  doc.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") currentWindow.close();
-  });
 }
 initComposeBodyDoc();
 attachLinkBar(composeBodyEl, (url) => invoke("open_external_url", { url }));
