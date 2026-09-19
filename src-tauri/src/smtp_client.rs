@@ -301,7 +301,11 @@ mod tests {
         let raw = build_raw(&message(&html), "me@example.com", false);
         assert!(raw.contains("multipart/related"));
         assert!(!raw.contains("data:image"));
-        assert_eq!(raw.matches("Content-ID:").count(), 1, "identical images share one part");
+        assert_eq!(
+            raw.matches("Content-ID:").count(),
+            1,
+            "identical images share one part"
+        );
         assert_eq!(raw.matches("src=\"cid:").count(), 2);
         assert!(raw.contains("Content-Type: image/png"));
     }

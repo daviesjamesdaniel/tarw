@@ -190,7 +190,11 @@ pub fn envelope_row(e: &Envelope) -> EnvelopeRow {
             .first()
             .map(|a| a.display_name().to_string())
             .unwrap_or_else(|| "(unknown sender)".to_string()),
-        from_address: e.from().first().map(|a| a.get_email().to_string()).unwrap_or_default(),
+        from_address: e
+            .from()
+            .first()
+            .map(|a| a.get_email().to_string())
+            .unwrap_or_default(),
         to: format_address_list(e.to()),
         cc: format_address_list(e.cc()),
         date: e.date(),
@@ -518,9 +522,12 @@ fn content_id(att: &melib::email::Attachment) -> Option<String> {
     let head = String::from_utf8_lossy(&att.raw[..end]);
     head.lines().find_map(|line| {
         let (name, value) = line.split_once(':')?;
-        name.trim()
-            .eq_ignore_ascii_case("content-id")
-            .then(|| value.trim().trim_matches(|c| c == '<' || c == '>').to_string())
+        name.trim().eq_ignore_ascii_case("content-id").then(|| {
+            value
+                .trim()
+                .trim_matches(|c| c == '<' || c == '>')
+                .to_string()
+        })
     })
 }
 
@@ -692,7 +699,12 @@ pub fn move_message(
         ));
     }
     let batch = EnvelopeHashBatch::from(hash);
-    block_on(imap.copy_messages(batch, source_mailbox_hash, destination_mailbox_hash, /* move */ true)?)
+    block_on(imap.copy_messages(
+        batch,
+        source_mailbox_hash,
+        destination_mailbox_hash,
+        /* move */ true,
+    )?)
 }
 
 pub fn set_flag(
@@ -761,7 +773,10 @@ mod inline_image_tests {
         let envelope = Envelope::from_bytes(raw.as_bytes(), None).unwrap();
         let body = envelope.body_bytes(raw.as_bytes());
         let text = html_body(&body);
-        assert!(text.contains("cid:"), "sent HTML should reference cid: {text}");
+        assert!(
+            text.contains("cid:"),
+            "sent HTML should reference cid: {text}"
+        );
         let infos = attachment_infos(&body);
         assert_eq!(infos.len(), 1, "inline image is listed before inlining");
         let (out, inlined) = inline_cid_images(text, &body);

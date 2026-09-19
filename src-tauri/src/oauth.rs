@@ -15,7 +15,8 @@ use crate::providers::OAuthProviderConfig;
 const KEYRING_SERVICE: &str = "tarw";
 
 fn pending_logins() -> &'static Mutex<std::collections::HashMap<String, Arc<AtomicBool>>> {
-    static PENDING: OnceLock<Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+    static PENDING: OnceLock<Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>> =
+        OnceLock::new();
     PENDING.get_or_init(Default::default)
 }
 
@@ -180,10 +181,15 @@ fn interactive_login(email: &str, cfg: &OAuthProviderConfig) -> melib::Result<St
 // How long to wait for the browser redirect before giving up (e.g. tab closed without signing in).
 const REDIRECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 
-fn accept_redirect(listener: &TcpListener, cancel_flag: &AtomicBool) -> melib::Result<(String, String)> {
-    listener
-        .set_nonblocking(true)
-        .map_err(|e| err(format!("Could not configure the OAuth redirect listener: {e}")))?;
+fn accept_redirect(
+    listener: &TcpListener,
+    cancel_flag: &AtomicBool,
+) -> melib::Result<(String, String)> {
+    listener.set_nonblocking(true).map_err(|e| {
+        err(format!(
+            "Could not configure the OAuth redirect listener: {e}"
+        ))
+    })?;
     let deadline = std::time::Instant::now() + REDIRECT_TIMEOUT;
     let mut stream = loop {
         if cancel_flag.load(Ordering::Relaxed) {
@@ -203,9 +209,11 @@ fn accept_redirect(listener: &TcpListener, cancel_flag: &AtomicBool) -> melib::R
             Err(e) => return Err(err(format!("Did not receive the OAuth redirect: {e}"))),
         }
     };
-    stream
-        .set_nonblocking(false)
-        .map_err(|e| err(format!("Could not configure the OAuth redirect connection: {e}")))?;
+    stream.set_nonblocking(false).map_err(|e| {
+        err(format!(
+            "Could not configure the OAuth redirect connection: {e}"
+        ))
+    })?;
 
     let mut reader = BufReader::new(stream.try_clone().map_err(|e| err(format!("{e}")))?);
     let mut request_line = String::new();
@@ -320,10 +328,12 @@ pub fn get_xoauth2_password(
     email: &str,
     provider: &crate::providers::ProviderConfig,
 ) -> melib::Result<String> {
-    let cfg = provider
-        .oauth
-        .as_ref()
-        .ok_or_else(|| err(format!("{} is not an OAuth2 provider", provider.display_name)))?;
+    let cfg = provider.oauth.as_ref().ok_or_else(|| {
+        err(format!(
+            "{} is not an OAuth2 provider",
+            provider.display_name
+        ))
+    })?;
 
     let refreshed = try_refresh(email, cfg)?;
     let access_token = match refreshed {

@@ -12,9 +12,8 @@ pub enum AccountProvider {
 impl AccountProvider {
     pub fn resolve(&self) -> melib::Result<ProviderConfig> {
         match self {
-            AccountProvider::Builtin { id } => crate::providers::by_id(id).ok_or_else(|| {
-                melib::error::Error::new(format!("Unknown provider id {id:?}"))
-            }),
+            AccountProvider::Builtin { id } => crate::providers::by_id(id)
+                .ok_or_else(|| melib::error::Error::new(format!("Unknown provider id {id:?}"))),
             AccountProvider::Manual(cfg) => Ok(cfg.clone()),
         }
     }
@@ -139,7 +138,10 @@ pub fn update_signatures(
         .iter_mut()
         .find(|a| a.email == email)
         .ok_or_else(|| melib::error::Error::new(format!("No account {email}")))?;
-    let known = |id: &Option<String>| id.clone().filter(|id| signatures.iter().any(|s| &s.id == id));
+    let known = |id: &Option<String>| {
+        id.clone()
+            .filter(|id| signatures.iter().any(|s| &s.id == id))
+    };
     account.default_signature_id = known(&default_signature_id);
     account.signature_on_replies = signature_on_replies;
     account.signatures = signatures;

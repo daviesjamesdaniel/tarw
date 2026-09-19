@@ -21,7 +21,9 @@ pub fn set_password(email: &str, password: &str) -> melib::Result<()> {
 
 pub fn get_password(email: &str) -> melib::Result<String> {
     entry(email)?.get_password().map_err(|e| match e {
-        keyring::Error::NoEntry => err(format!("No stored password for {email} - re-add the account.")),
+        keyring::Error::NoEntry => err(format!(
+            "No stored password for {email} - re-add the account."
+        )),
         e => err(format!("Could not read stored password: {e}")),
     })
 }

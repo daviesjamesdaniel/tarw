@@ -175,7 +175,8 @@ fn run_on_slot<T>(
         // a cleanup-failure error would be.
         let _ = imap_client::remove_cache_files(account);
     }
-    let reconnect = provider_for(state, account).and_then(|provider| imap_client::connect(account, &provider));
+    let reconnect =
+        provider_for(state, account).and_then(|provider| imap_client::connect(account, &provider));
     let Ok(fresh) = reconnect else {
         drop(imap);
         state
@@ -276,7 +277,10 @@ fn mailbox_infos_to_dtos(infos: Vec<imap_client::MailboxInfo>) -> Vec<MailboxInf
 }
 
 #[tauri::command]
-async fn fetch_mailboxes(app: tauri::AppHandle, account: String) -> Result<Vec<MailboxInfoDto>, String> {
+async fn fetch_mailboxes(
+    app: tauri::AppHandle,
+    account: String,
+) -> Result<Vec<MailboxInfoDto>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         with_connection(&state, &account, |imap| imap_client::list_mailboxes(imap))
@@ -288,12 +292,17 @@ async fn fetch_mailboxes(app: tauri::AppHandle, account: String) -> Result<Vec<M
 }
 
 #[tauri::command]
-async fn refresh_mailboxes(app: tauri::AppHandle, account: String) -> Result<Vec<MailboxInfoDto>, String> {
+async fn refresh_mailboxes(
+    app: tauri::AppHandle,
+    account: String,
+) -> Result<Vec<MailboxInfoDto>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        with_connection(&state, &account, |imap| imap_client::refresh_mailboxes(imap))
-            .map(mailbox_infos_to_dtos)
-            .map_err(|e| e.to_string())
+        with_connection(&state, &account, |imap| {
+            imap_client::refresh_mailboxes(imap)
+        })
+        .map(mailbox_infos_to_dtos)
+        .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -422,29 +431,29 @@ async fn fetch_body(
         with_connection(&state, &account, |imap| {
             imap_client::fetch_body(imap, hash, mailbox_hash)
         })
-            .map(|r| BodyDto {
-                body: r.body,
-                is_html: r.is_html,
-                attachments: r
-                    .attachments
-                    .into_iter()
-                    .map(|a| AttachmentInfoDto {
-                        index: a.index,
-                        filename: a.filename,
-                        mime_type: a.mime_type,
-                        size: a.size,
-                    })
-                    .collect(),
-                from: r.from,
-                to: r.to,
-                cc: r.cc,
-                reply_to: r.reply_to,
-                subject: r.subject,
-                date: r.date,
-                message_id: r.message_id,
-                references: r.references,
-            })
-            .map_err(|e| e.to_string())
+        .map(|r| BodyDto {
+            body: r.body,
+            is_html: r.is_html,
+            attachments: r
+                .attachments
+                .into_iter()
+                .map(|a| AttachmentInfoDto {
+                    index: a.index,
+                    filename: a.filename,
+                    mime_type: a.mime_type,
+                    size: a.size,
+                })
+                .collect(),
+            from: r.from,
+            to: r.to,
+            cc: r.cc,
+            reply_to: r.reply_to,
+            subject: r.subject,
+            date: r.date,
+            message_id: r.message_id,
+            references: r.references,
+        })
+        .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -580,7 +589,11 @@ async fn set_flagged(
 }
 
 #[tauri::command]
-async fn mark_all_seen(app: tauri::AppHandle, account: String, mailbox_hash: String) -> Result<(), String> {
+async fn mark_all_seen(
+    app: tauri::AppHandle,
+    account: String,
+    mailbox_hash: String,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let mailbox_hash = parse_mailbox_hash(&mailbox_hash)?;
         let state = app.state::<AppState>();
@@ -594,7 +607,11 @@ async fn mark_all_seen(app: tauri::AppHandle, account: String, mailbox_hash: Str
 }
 
 #[tauri::command]
-async fn delete_all_messages(app: tauri::AppHandle, account: String, mailbox_hash: String) -> Result<(), String> {
+async fn delete_all_messages(
+    app: tauri::AppHandle,
+    account: String,
+    mailbox_hash: String,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let mailbox_hash = parse_mailbox_hash(&mailbox_hash)?;
         let state = app.state::<AppState>();
@@ -608,7 +625,11 @@ async fn delete_all_messages(app: tauri::AppHandle, account: String, mailbox_has
 }
 
 #[tauri::command]
-async fn create_mailbox(app: tauri::AppHandle, account: String, path: String) -> Result<Vec<MailboxInfoDto>, String> {
+async fn create_mailbox(
+    app: tauri::AppHandle,
+    account: String,
+    path: String,
+) -> Result<Vec<MailboxInfoDto>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let result = with_connection(&state, &account, |imap| {
@@ -832,7 +853,9 @@ async fn send_message(
     // in the background, but this at least bounds how long the UI waits on it.
     match tokio::time::timeout(std::time::Duration::from_secs(30), send).await {
         Ok(result) => result.map_err(|e| e.to_string())?,
-        Err(_) => Err("Timed out sending message - check your network connection and try again".to_string()),
+        Err(_) => Err(
+            "Timed out sending message - check your network connection and try again".to_string(),
+        ),
     }
 }
 
@@ -894,7 +917,10 @@ fn list_accounts(app: tauri::AppHandle) -> Result<Vec<accounts::AccountRecord>, 
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
     let lower = url.trim().to_ascii_lowercase();
-    if !(lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("mailto:")) {
+    if !(lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("mailto:"))
+    {
         return Err("Unsupported link scheme".to_string());
     }
     tauri_plugin_opener::open_url(url.trim(), None::<&str>).map_err(|e| e.to_string())
@@ -1114,7 +1140,9 @@ async fn add_account(
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let provider = match (&provider_id, manual) {
-            (Some(id), _) => providers::by_id(id).ok_or_else(|| "Unknown provider id".to_string())?,
+            (Some(id), _) => {
+                providers::by_id(id).ok_or_else(|| "Unknown provider id".to_string())?
+            }
             (None, Some(m)) => m.into_provider_config(&email),
             (None, None) => providers::detect_from_email(&email).ok_or_else(|| {
                 "Could not detect provider - please enter connection details".to_string()
@@ -1166,11 +1194,7 @@ async fn add_account(
         let saved = accounts::load(&app)
             .ok()
             .and_then(|list| list.into_iter().find(|a| a.email == email));
-        Ok(saved.unwrap_or(accounts::AccountRecord::new(
-            email,
-            None,
-            account_provider,
-        )))
+        Ok(saved.unwrap_or(accounts::AccountRecord::new(email, None, account_provider)))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1393,7 +1417,11 @@ pub fn run() {
                         .lock()
                         .unwrap()
                         .insert(record.email.clone(), stop_flag.clone());
-                    spawn_watcher(app.handle().clone(), record.email.clone(), stop_flag.clone());
+                    spawn_watcher(
+                        app.handle().clone(),
+                        record.email.clone(),
+                        stop_flag.clone(),
+                    );
                     spawn_keepalive(app.handle().clone(), record.email, stop_flag);
                 }
             }
