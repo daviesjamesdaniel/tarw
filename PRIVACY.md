@@ -14,6 +14,7 @@ When you sign in with Gmail via Google OAuth2, Tarw requests access to your Gmai
 
 - OAuth tokens and app passwords are stored in your operating system's own secure credential store (e.g. GNOME Keyring, KWallet), never in plain text, never uploaded anywhere.
 - A local mail cache (message headers, for offline browsing) is stored only on your own device.
+- Email signatures you create, including any links and images in them, are saved with your account list on your own device. They leave it only as part of a message you choose to send.
 
 ## Third parties
 
