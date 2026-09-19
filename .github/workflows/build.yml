@@ -18,6 +18,15 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Cheap and fast, so it fails before the heavy distro builds spin up. Run
+  # `cargo fmt` in src-tauri to fix a failure.
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup component add rustfmt
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
   arch:
     runs-on: ubuntu-latest
     container: archlinux:latest
