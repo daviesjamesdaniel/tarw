@@ -28,8 +28,11 @@ Tarw (Welsh for "bull" — a nod to Tauri/Taurus) is a genuinely beautiful nativ
 - OAuth2 login (Gmail), multi-account support with a unified inbox
 - Mailbox hierarchy, folder create/delete/rename/move-to-folder
 - Read/unread, star/pin, delete, move — real IMAP flag operations
-- Compose, Reply/Reply-All/Forward (with original message context), rich-text editing, Save to Drafts
-- HTML email rendering (sandboxed iframe, remote-image opt-in), attachment view/download
+- Compose, Reply/Reply-All/Forward (with original message context), rich-text editing (fonts, sizes, colours), Save to Drafts
+- File attachments on compose, including drag and drop, and on drafts
+- HTML signatures, several per account, with links and inline images
+- Conversation (thread) view
+- HTML email rendering (sandboxed iframe, remote-image opt-in, inline `cid:` images), attachment view/download
 - Real-time push via IMAP IDLE, desktop notifications, minimise-to-tray
 
 ## Getting started
