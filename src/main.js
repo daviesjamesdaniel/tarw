@@ -1,4 +1,4 @@
-import { attachImageBar, attachLinkBar, insertImageInEditor, insertLinkInEditor, prepareImage, sanitizeHtml } from "./richtext.js";
+import { attachFontSync, fillFontSelect, attachImageBar, attachLinkBar, insertImageInEditor, insertLinkInEditor, prepareImage, sanitizeHtml } from "./richtext.js";
 
 const { invoke } = window.__TAURI__.core;
 
@@ -1744,6 +1744,8 @@ function initSignatureDoc() {
       '</style></head><body contenteditable="true"></body></html>',
   );
   doc.close();
+  // Produce <span style=...> for colour/size rather than legacy <font> tags.
+  doc.execCommand("styleWithCSS", false, true);
 }
 
 function currentSignature() {
@@ -1840,6 +1842,25 @@ document.getElementById("signature-toolbar").addEventListener("click", (e) => {
   if (!button) return;
   signatureBodyEl.contentWindow.focus();
   signatureBodyEl.contentDocument.execCommand(button.dataset.cmd, false, null);
+});
+
+document.getElementById("signature-text-color").addEventListener("input", (e) => {
+  signatureBodyEl.contentWindow.focus();
+  signatureBodyEl.contentDocument.execCommand("foreColor", false, e.target.value);
+});
+
+fillFontSelect(document.getElementById("signature-font-family"));
+attachFontSync(signatureBodyEl, document.getElementById("signature-font-family"), document.getElementById("signature-font-size"));
+document.getElementById("signature-font-family").addEventListener("change", (e) => {
+  if (!e.target.value) return;
+  signatureBodyEl.contentWindow.focus();
+  signatureBodyEl.contentDocument.execCommand("fontName", false, e.target.value);
+});
+
+document.getElementById("signature-font-size").addEventListener("change", (e) => {
+  if (!e.target.value) return;
+  signatureBodyEl.contentWindow.focus();
+  signatureBodyEl.contentDocument.execCommand("fontSize", false, e.target.value);
 });
 
 document.getElementById("signature-link-button").addEventListener("click", () => insertLinkInEditor(signatureBodyEl));

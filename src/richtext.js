@@ -1,5 +1,7 @@
 // Shared by the main window (signature editor) and the compose window.
 
+export const SIGNATURE_MARKER = "data-tarw-signature";
+
 export function escapeHtml(s) {
   const div = document.createElement("div");
   div.textContent = s;
@@ -22,6 +24,9 @@ export function htmlToPlainText(html) {
     if (!href || text === href || text === bare) return;
     a.append(` (${bare})`);
   });
+  // The "-- " delimiter belongs to the plain-text version only; the HTML
+  // version shows just a gap above the signature.
+  scratch.querySelectorAll(`[${SIGNATURE_MARKER}]`).forEach((el) => el.prepend("\n-- \n"));
   scratch.querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
   scratch.querySelectorAll("p, div, tr, li, h1, h2, h3, h4, h5, h6").forEach((el) => {
     el.append("\n");
@@ -44,7 +49,36 @@ const ALLOWED_ATTRS = {
   TD: ["colspan", "rowspan"],
   TH: ["colspan", "rowspan"],
 };
-const ALLOWED_STYLE_PROPS = ["font-weight", "font-style", "text-decoration"];
+const ALLOWED_STYLE_PROPS = [
+  "color",
+  "font-size",
+  "font-family",
+  "font-weight",
+  "font-style",
+  "text-decoration",
+];
+const FONT_SIZE_PX = { 1: 10, 2: 13, 3: 16, 4: 18, 5: 24, 6: 32, 7: 48 };
+
+// Style values are copied verbatim into the stored signature, so refuse
+// anything that could pull in a resource or break out of the attribute.
+function safeStyleValue(value) {
+  return value.length <= 120 && !/url\s*\(|expression|@import|[<>\\]|javascript:/i.test(value);
+}
+
+// Old-school <font color face size> (Outlook/Word paste, execCommand without
+// styleWithCSS) becomes a span with equivalent inline style.
+function fontToSpan(font) {
+  const span = font.ownerDocument.createElement("span");
+  const color = font.getAttribute("color");
+  const face = font.getAttribute("face");
+  const size = FONT_SIZE_PX[font.getAttribute("size")];
+  if (color) span.style.color = color;
+  if (face) span.style.fontFamily = face;
+  if (size) span.style.fontSize = `${size}px`;
+  span.append(...font.childNodes);
+  font.replaceWith(span);
+  return span;
+}
 
 function safeHref(value) {
   return /^(https?:|mailto:|tel:)/i.test(value.trim());
@@ -55,7 +89,7 @@ function safeImgSrc(value) {
 }
 
 function sanitizeNode(node) {
-  for (const child of [...node.childNodes]) {
+  for (let child of [...node.childNodes]) {
     if (child.nodeType === Node.COMMENT_NODE) {
       child.remove();
     } else if (child.nodeType === Node.ELEMENT_NODE) {
@@ -63,6 +97,7 @@ function sanitizeNode(node) {
         child.remove();
         continue;
       }
+      if (child.tagName === "FONT") child = fontToSpan(child);
       sanitizeNode(child);
       if (!ALLOWED_TAGS.has(child.tagName)) {
         child.replaceWith(...child.childNodes);
@@ -72,7 +107,7 @@ function sanitizeNode(node) {
       const keptStyle = [];
       for (const prop of ALLOWED_STYLE_PROPS) {
         const v = child.style.getPropertyValue(prop);
-        if (v) keptStyle.push(`${prop}:${v}`);
+        if (v && safeStyleValue(v)) keptStyle.push(`${prop}:${v}`);
       }
       for (const attr of [...child.attributes]) {
         if (!allowed.includes(attr.name)) child.removeAttribute(attr.name);
@@ -353,4 +388,51 @@ export function attachImageBar(iframe) {
   altEl.addEventListener("input", () => {
     if (current) current.setAttribute("alt", altEl.value);
   });
+}
+
+// Fonts offered in the compose and signature toolbars. Recipients only have
+// what is installed on their own machine, so these are the widely available
+// ones, each with a generic fallback.
+const FONT_GROUPS = [
+  ["Sans-serif", [["Arial", "Arial, sans-serif"], ["Helvetica", "Helvetica, Arial, sans-serif"], ["Verdana", "Verdana, sans-serif"], ["Tahoma", "Tahoma, sans-serif"], ["Trebuchet MS", "'Trebuchet MS', sans-serif"], ["Calibri", "Calibri, Arial, sans-serif"]]],
+  ["Serif", [["Georgia", "Georgia, serif"], ["Times New Roman", "'Times New Roman', Times, serif"], ["Palatino", "'Palatino Linotype', Palatino, serif"], ["Garamond", "Garamond, serif"]]],
+  ["Monospace", [["Courier New", "'Courier New', monospace"], ["Lucida Console", "'Lucida Console', Monaco, monospace"]]],
+  ["Other", [["Comic Sans MS", "'Comic Sans MS', cursive, sans-serif"]]],
+];
+
+export function fillFontSelect(select) {
+  for (const [label, fonts] of FONT_GROUPS) {
+    const group = document.createElement("optgroup");
+    group.label = label;
+    for (const [name, stack] of fonts) {
+      const option = document.createElement("option");
+      option.value = stack;
+      option.textContent = name;
+      group.appendChild(option);
+    }
+    select.appendChild(group);
+  }
+}
+
+// Keeps the font and size dropdowns showing what is under the cursor or
+// selection. Polled for the same reason as the link/image bars. Skipped while
+// one of the dropdowns has focus so it can't fight the user's own choice.
+export function attachFontSync(iframe, familySelect, sizeSelect) {
+  const firstFamily = (stack) => stack.split(",")[0].trim().replace(/^['"]|['"]$/g, "").toLowerCase();
+  const familyByName = new Map(
+    [...familySelect.options].filter((o) => o.value).map((o) => [firstFamily(o.value), o.value]),
+  );
+  setInterval(() => {
+    if (!iframe.isConnected || iframe.offsetParent === null) return;
+    if (document.activeElement === familySelect || document.activeElement === sizeSelect) return;
+    const doc = iframe.contentDocument;
+    if (!doc) return;
+    try {
+      familySelect.value = familyByName.get(firstFamily(doc.queryCommandValue("fontName") || "")) ?? "";
+      const size = doc.queryCommandValue("fontSize");
+      sizeSelect.value = [...sizeSelect.options].some((o) => o.value === size) ? size : "";
+    } catch {
+      // queryCommandValue can throw before the editor document is ready.
+    }
+  }, 250);
 }

@@ -1,4 +1,4 @@
-import { escapeHtml, htmlToPlainText, attachLinkBar, insertLinkInEditor } from "./richtext.js";
+import { SIGNATURE_MARKER, attachFontSync, fillFontSelect, escapeHtml, htmlToPlainText, attachLinkBar, insertLinkInEditor } from "./richtext.js";
 
 const { invoke } = window.__TAURI__.core;
 const { emit } = window.__TAURI__.event;
@@ -180,6 +180,29 @@ composeToolbarEl.addEventListener("click", (e) => {
 
 composeLinkButtonEl.addEventListener("click", () => insertLinkInEditor(composeBodyEl));
 
+// Font and size are applied as inline CSS (span style) rather than legacy
+// <font> tags; styleWithCSS is switched on only for these two commands so
+// bold/italic/colour keep behaving as before.
+function applyFontCommand(command, value) {
+  if (!value) return;
+  const win = composeBodyEl.contentWindow;
+  const doc = composeBodyEl.contentDocument;
+  win.focus();
+  doc.execCommand("styleWithCSS", false, true);
+  doc.execCommand(command, false, value);
+  doc.execCommand("styleWithCSS", false, false);
+}
+
+fillFontSelect(document.getElementById("compose-font-family"));
+attachFontSync(composeBodyEl, document.getElementById("compose-font-family"), document.getElementById("compose-font-size"));
+document.getElementById("compose-font-family").addEventListener("change", (e) => {
+  applyFontCommand("fontName", e.target.value);
+});
+
+document.getElementById("compose-font-size").addEventListener("change", (e) => {
+  applyFontCommand("fontSize", e.target.value);
+});
+
 composeTextColorEl.addEventListener("input", (e) => {
   composeBodyEl.contentWindow.focus();
   composeBodyEl.contentDocument.execCommand("foreColor", false, e.target.value);
@@ -198,7 +221,6 @@ function getComposeBodyHtml() {
   return composeBodyEl.contentDocument.body.innerHTML;
 }
 
-const SIGNATURE_MARKER = "data-tarw-signature";
 let composeAccounts = [];
 let composeIsReplyLike = false;
 
@@ -219,7 +241,8 @@ function applyComposeSignature(email, signatureId) {
   if (!sig) return;
   const block = composeBodyEl.contentDocument.createElement("div");
   block.setAttribute(SIGNATURE_MARKER, sig.id);
-  block.innerHTML = `<br>-- <br>${sig.html}`;
+  block.style.marginTop = "1em";
+  block.innerHTML = sig.html;
   const anchor = composeIsReplyLike ? body.firstElementChild : null;
   if (anchor) anchor.after(block);
   else body.appendChild(block);
@@ -370,6 +393,9 @@ document.addEventListener("keydown", (e) => {
 // but the copy that goes out over SMTP doesn't carry it.
 function gatherComposeFields({ forSend = false } = {}) {
   let bodyHtml = getComposeBodyHtml();
+  // Plain-text version is built while the marker is still there, so it can
+  // put the "-- " delimiter before the signature.
+  const bodyText = htmlToPlainText(bodyHtml);
   if (forSend) bodyHtml = bodyHtml.replace(new RegExp(` ${SIGNATURE_MARKER}="[^"]*"`, "g"), "");
   return {
     account: composeAccountEl.value,
@@ -378,7 +404,7 @@ function gatherComposeFields({ forSend = false } = {}) {
     bcc: composeBccEl.value,
     subject: composeSubjectEl.value,
     bodyHtml,
-    bodyText: htmlToPlainText(bodyHtml),
+    bodyText,
     inReplyTo: composeInReplyTo,
     references: composeReferences,
     attachmentSourceHash: composeForwardAttachments?.sourceHash ?? "",
