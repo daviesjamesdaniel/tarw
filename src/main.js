@@ -1,4 +1,4 @@
-import { attachLinkBar, insertLinkInEditor, sanitizeHtml } from "./richtext.js";
+import { attachImageBar, attachLinkBar, insertImageInEditor, insertLinkInEditor, prepareImage, sanitizeHtml } from "./richtext.js";
 
 const { invoke } = window.__TAURI__.core;
 
@@ -1716,6 +1716,22 @@ let signatureDraft = null;
 let signatureCurrentId = null;
 
 attachLinkBar(signatureBodyEl, (url) => invoke("open_external_url", { url }));
+attachImageBar(signatureBodyEl);
+
+document.getElementById("signature-image-button").addEventListener("click", async () => {
+  try {
+    const path = await window.__TAURI__.dialog.open({
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+    });
+    if (!path) return;
+    const file = await invoke("read_attachment_file", { path });
+    if (!file.mime_type.startsWith("image/")) throw new Error("That file isn't an image");
+    insertImageInEditor(signatureBodyEl, await prepareImage(file.bytes_base64, file.mime_type));
+  } catch (err) {
+    console.error("insert signature image failed", err);
+    showErrorToast(`Couldn't add image: ${err?.message ?? err}`);
+  }
+});
 
 function initSignatureDoc() {
   const doc = signatureBodyEl.contentDocument;
@@ -1724,7 +1740,7 @@ function initSignatureDoc() {
     "<!doctype html><html><head><style>" +
       "html,body{margin:0;padding:0.6rem;background:Canvas;color:CanvasText;" +
       'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:0.88rem;}' +
-      "img{max-width:100%;}" +
+      "img{max-width:100%;-webkit-user-select:all;user-select:all;}" +
       '</style></head><body contenteditable="true"></body></html>',
   );
   doc.close();

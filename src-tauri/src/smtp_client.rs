@@ -51,6 +51,64 @@ fn base64_wrapped(bytes: &[u8]) -> String {
         .join("\r\n")
 }
 
+struct InlineImage {
+    cid: String,
+    mime_type: String,
+    bytes: Vec<u8>,
+}
+
+/// Swaps each `src="data:image/...;base64,..."` in the HTML for a `cid:` reference and
+/// returns the decoded images to attach as inline parts. Mail clients (Gmail, Outlook) block
+/// or drop `data:` images, whereas CID-referenced inline parts display reliably.
+fn extract_inline_images(html: &str) -> (String, Vec<InlineImage>) {
+    const START: &str = "src=\"data:image/";
+    let mut out = String::with_capacity(html.len());
+    let mut images: Vec<InlineImage> = Vec::new();
+    let mut seen: Vec<(String, usize)> = Vec::new();
+    let mut rest = html;
+    while let Some(pos) = rest.find(START) {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos + "src=\"".len()..];
+        let Some(end) = after.find('"') else {
+            out.push_str(&rest[pos..]);
+            rest = "";
+            break;
+        };
+        let uri = &after[..end];
+        let decoded = uri
+            .strip_prefix("data:")
+            .and_then(|u| u.split_once(";base64,"))
+            .and_then(|(mime, data)| {
+                base64::engine::general_purpose::STANDARD
+                    .decode(data)
+                    .ok()
+                    .map(|bytes| (mime.to_string(), bytes))
+            });
+        match decoded {
+            Some((mime_type, bytes)) => {
+                let index = match seen.iter().find(|(u, _)| u == uri) {
+                    Some((_, i)) => *i,
+                    None => {
+                        let i = images.len();
+                        images.push(InlineImage {
+                            cid: format!("img{}.{}@tarw.local", i + 1, std::process::id()),
+                            mime_type,
+                            bytes,
+                        });
+                        seen.push((uri.to_string(), i));
+                        i
+                    }
+                };
+                out.push_str(&format!("src=\"cid:{}\"", images[index].cid));
+            }
+            None => out.push_str(&rest[pos..pos + "src=\"".len() + end + 1]),
+        }
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    (out, images)
+}
+
 /// `include_bcc_header` should be true when saving a draft (so reopening it still shows who was
 /// Bcc'd) and false when actually sending over SMTP (recipients must never see the Bcc header -
 /// they're addressed separately via the envelope recipient list instead).
@@ -69,15 +127,49 @@ pub fn build_raw(msg: &OutgoingMessage, account: &str, include_bcc_header: bool)
         raw += &format!("References: {}\r\n", msg.references.trim());
     }
     let alt_boundary = generate_boundary();
+    // Drafts keep data: URIs so reopening one still shows the images; only what
+    // actually goes out over SMTP gets converted to inline CID parts.
+    let (body_html, inline_images) = if include_bcc_header {
+        (msg.body_html.clone(), Vec::new())
+    } else {
+        extract_inline_images(&msg.body_html)
+    };
+    let html_part = if inline_images.is_empty() {
+        format!(
+            "Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{body_html}"
+        )
+    } else {
+        let rel_boundary = generate_boundary();
+        let mut part = format!(
+            "Content-Type: multipart/related; type=\"text/html\"; boundary=\"{rel_boundary}\"\r\n\r\n\
+             --{rel_boundary}\r\n\
+             Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n\
+             {body_html}\r\n"
+        );
+        for img in &inline_images {
+            part += &format!(
+                "--{rel_boundary}\r\n\
+                 Content-Type: {}\r\n\
+                 Content-Transfer-Encoding: base64\r\n\
+                 Content-ID: <{}>\r\n\
+                 Content-Disposition: inline\r\n\r\n\
+                 {}\r\n",
+                img.mime_type,
+                img.cid,
+                base64_wrapped(&img.bytes),
+            );
+        }
+        part += &format!("--{rel_boundary}--");
+        part
+    };
     let alt_part = format!(
         "--{alt_boundary}\r\n\
          Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n\
          {}\r\n\
          --{alt_boundary}\r\n\
-         Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n\
-         {}\r\n\
+         {html_part}\r\n\
          --{alt_boundary}--\r\n",
-        msg.body_text, msg.body_html,
+        msg.body_text,
     );
 
     let headers = format!(
@@ -179,4 +271,54 @@ pub fn send(
         conn.mail_transaction(&raw, Some(&recipients)).await?;
         conn.quit().await
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(html: &str) -> OutgoingMessage {
+        OutgoingMessage {
+            to: "a@example.com".into(),
+            cc: String::new(),
+            bcc: String::new(),
+            subject: "s".into(),
+            body_html: html.into(),
+            body_text: "t".into(),
+            in_reply_to: String::new(),
+            references: String::new(),
+            attachments: Vec::new(),
+        }
+    }
+
+    const PNG: &str = "iVBORw0KGgo=";
+
+    #[test]
+    fn data_uris_become_inline_cid_parts_when_sending() {
+        let html = format!(
+            "<p>hi</p><img src=\"data:image/png;base64,{PNG}\" width=\"100\"><img src=\"data:image/png;base64,{PNG}\">"
+        );
+        let raw = build_raw(&message(&html), "me@example.com", false);
+        assert!(raw.contains("multipart/related"));
+        assert!(!raw.contains("data:image"));
+        assert_eq!(raw.matches("Content-ID:").count(), 1, "identical images share one part");
+        assert_eq!(raw.matches("src=\"cid:").count(), 2);
+        assert!(raw.contains("Content-Type: image/png"));
+    }
+
+    #[test]
+    fn drafts_keep_data_uris() {
+        let html = format!("<img src=\"data:image/png;base64,{PNG}\">");
+        let raw = build_raw(&message(&html), "me@example.com", true);
+        assert!(raw.contains("data:image/png;base64,"));
+        assert!(!raw.contains("multipart/related"));
+    }
+
+    #[test]
+    fn undecodable_data_uri_is_left_alone() {
+        let html = "<img src=\"data:image/png;base64,!!!not-base64!!!\">";
+        let (out, images) = extract_inline_images(html);
+        assert_eq!(out, html);
+        assert!(images.is_empty());
+    }
 }

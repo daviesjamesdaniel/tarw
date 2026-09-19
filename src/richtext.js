@@ -40,7 +40,7 @@ const ALLOWED_TAGS = new Set([
 ]);
 const ALLOWED_ATTRS = {
   A: ["href"],
-  IMG: ["src", "alt", "width", "height"],
+  IMG: ["src", "alt", "width", "height", "border"],
   TD: ["colspan", "rowspan"],
   TH: ["colspan", "rowspan"],
 };
@@ -217,5 +217,140 @@ export function attachLinkBar(iframe, openUrl) {
       a.setAttribute("href", /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`);
       urlEl.textContent = a.getAttribute("href");
     }
+  });
+}
+
+// Signature images are stored inline as data: URIs (rewritten to CID parts on
+// send), so keep them modest: anything wider than MAX_IMAGE_WIDTH is scaled
+// down, and the result has to fit under MAX_IMAGE_BYTES.
+const MAX_IMAGE_WIDTH = 600;
+const MAX_IMAGE_BYTES = 300 * 1024;
+const MIN_IMAGE_WIDTH = 120;
+
+const approxBytes = (dataUri) => Math.floor(((dataUri.length - dataUri.indexOf(",") - 1) * 3) / 4);
+
+// Returns { dataUri, width } for an image given as base64. Small images pass
+// through untouched (keeping e.g. GIF animation); others are re-drawn scaled.
+export async function prepareImage(bytesBase64, mimeType) {
+  const original = `data:${mimeType};base64,${bytesBase64}`;
+  const img = new Image();
+  img.src = original;
+  try {
+    await img.decode();
+  } catch {
+    throw new Error("That file isn't an image the editor can read");
+  }
+  if (img.naturalWidth <= MAX_IMAGE_WIDTH && approxBytes(original) <= MAX_IMAGE_BYTES) {
+    return { dataUri: original, width: img.naturalWidth };
+  }
+  const outType = mimeType === "image/jpeg" ? "image/jpeg" : "image/png";
+  let width = Math.min(img.naturalWidth, MAX_IMAGE_WIDTH);
+  for (;;) {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = Math.max(1, Math.round((img.naturalHeight * width) / img.naturalWidth));
+    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+    const dataUri = canvas.toDataURL(outType, 0.85);
+    if (approxBytes(dataUri) <= MAX_IMAGE_BYTES) return { dataUri, width };
+    if (width <= MIN_IMAGE_WIDTH) {
+      throw new Error("That image is too large to use in a signature, even scaled down");
+    }
+    width = Math.round(width * 0.8);
+  }
+}
+
+export function insertImageInEditor(iframe, { dataUri, width }) {
+  const win = iframe.contentWindow;
+  win.focus();
+  const shown = Math.min(width, 200);
+  iframe.contentDocument.execCommand(
+    "insertHTML",
+    false,
+    `<img src="${dataUri}" alt="" width="${shown}" border="0">`,
+  );
+}
+
+// Like the link bar: while an image is selected in the editor, show a bar
+// with size presets, alt text and Remove. The selection is polled for the
+// same reason (no listeners on sandboxed editor documents).
+export function attachImageBar(iframe) {
+  const bar = document.createElement("div");
+  bar.className = "link-bar image-bar";
+  bar.hidden = true;
+  bar.innerHTML = `<span>Image</span>
+    <button type="button" class="link-bar-button" data-w="100">Small</button>
+    <button type="button" class="link-bar-button" data-w="200">Medium</button>
+    <button type="button" class="link-bar-button" data-w="300">Large</button>
+    <button type="button" class="link-bar-button" data-w="0">Original</button>
+    <input type="text" class="image-bar-alt" placeholder="Alt text" spellcheck="false" />
+    <button type="button" class="link-bar-button" data-act="link">Link</button>
+    <button type="button" class="link-bar-button" data-act="remove">Remove</button>`;
+  iframe.before(bar);
+  const altEl = bar.querySelector(".image-bar-alt");
+  let current = null;
+
+  // WebKit can represent a clicked image a few ways depending on how it was
+  // clicked, so accept any of them: the image as the selection's anchor, a
+  // range that spans exactly one image, or a non-text selection containing one.
+  const selectedImage = () => {
+    const sel = iframe.contentWindow?.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    if (sel.anchorNode?.nodeName === "IMG") return sel.anchorNode;
+    const range = sel.getRangeAt(0);
+    if (range.startContainer === range.endContainer && range.endOffset - range.startOffset === 1) {
+      const node = range.startContainer.childNodes[range.startOffset];
+      if (node?.nodeName === "IMG") return node;
+    }
+    if (!sel.isCollapsed && sel.toString().trim() === "") {
+      const inside = [...iframe.contentDocument.images].filter((img) => sel.containsNode(img, false));
+      if (inside.length === 1) return inside[0];
+    }
+    return null;
+  };
+
+  setInterval(() => {
+    if (!iframe.isConnected || iframe.offsetParent === null) {
+      bar.hidden = true;
+      current = null;
+      return;
+    }
+    const img = selectedImage();
+    if (img === current) return;
+    current = img;
+    bar.hidden = !img;
+    if (img) altEl.value = img.getAttribute("alt") ?? "";
+  }, 250);
+
+  bar.addEventListener("click", async (e) => {
+    const button = e.target.closest("button");
+    if (!button || !current) return;
+    if (button.dataset.act === "link") {
+      const img = current;
+      const existing = img.closest("a");
+      const raw = await askForLink(existing?.getAttribute("href") ?? "");
+      if (!raw) return;
+      const url = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+      if (existing) {
+        existing.setAttribute("href", url);
+      } else {
+        const a = img.ownerDocument.createElement("a");
+        a.setAttribute("href", url);
+        img.before(a);
+        a.appendChild(img);
+      }
+      img.setAttribute("border", "0");
+    } else if (button.dataset.act === "remove") {
+      current.remove();
+      current = null;
+      bar.hidden = true;
+    } else if (button.dataset.w !== undefined) {
+      const w = Number(button.dataset.w);
+      current.setAttribute("width", String(w === 0 ? current.naturalWidth : Math.min(w, current.naturalWidth)));
+      current.removeAttribute("height");
+    }
+  });
+
+  altEl.addEventListener("input", () => {
+    if (current) current.setAttribute("alt", altEl.value);
   });
 }

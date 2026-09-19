@@ -481,6 +481,80 @@ fn attachment_infos(body: &melib::email::Attachment) -> Vec<AttachmentInfo> {
         .collect()
 }
 
+/// melib's `text(Text::Html)` only looks at direct children of a
+/// multipart/alternative, so HTML nested in a multipart/related child (the
+/// usual layout for mail with embedded images: alternative[plain,
+/// related[html, images]]) comes back empty. Search nested multiparts
+/// ourselves when that happens.
+fn html_body(body: &melib::email::Attachment) -> String {
+    use melib::email::attachment_types::{ContentType, MultipartType};
+    let direct = body.text(Text::Html);
+    if !direct.trim().is_empty() {
+        return direct;
+    }
+    let ContentType::Multipart { parts, .. } = &body.content_type else {
+        return direct;
+    };
+    for part in parts {
+        let found = match &part.content_type {
+            ContentType::Multipart {
+                kind: MultipartType::Related,
+                ..
+            } => part.text(Text::Html),
+            ContentType::Multipart { .. } => html_body(part),
+            _ => String::new(),
+        };
+        if !found.trim().is_empty() {
+            return found;
+        }
+    }
+    direct
+}
+
+/// The part's Content-ID (without angle brackets), read from its own headers -
+/// melib doesn't expose it as a field.
+fn content_id(att: &melib::email::Attachment) -> Option<String> {
+    let end = att.body.offset.min(att.raw.len());
+    let head = String::from_utf8_lossy(&att.raw[..end]);
+    head.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.trim()
+            .eq_ignore_ascii_case("content-id")
+            .then(|| value.trim().trim_matches(|c| c == '<' || c == '>').to_string())
+    })
+}
+
+/// Replaces `cid:` references in the HTML with `data:` URIs built from the
+/// matching inline image parts, so logos and embedded pictures show in the
+/// body. Returns the new HTML and the indices (as used by `attachment_infos`)
+/// of the parts that were inlined, so they can be left out of the attachment list.
+fn inline_cid_images(html: String, body: &melib::email::Attachment) -> (String, Vec<usize>) {
+    use base64::Engine;
+    let mut html = html;
+    let mut inlined = Vec::new();
+    for (index, part) in real_attachments(body).into_iter().enumerate() {
+        let Some(cid) = content_id(&part).filter(|c| !c.is_empty()) else {
+            continue;
+        };
+        let mime_type = part.mime_type();
+        if !mime_type.starts_with("image/") {
+            continue;
+        }
+        let reference = format!("cid:{cid}");
+        if !html.contains(&reference) {
+            continue;
+        }
+        let bytes = part.decode(Default::default());
+        let data_uri = format!(
+            "data:{mime_type};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        );
+        html = html.replace(&reference, &data_uri);
+        inlined.push(index);
+    }
+    (html, inlined)
+}
+
 /// `mailbox_hash` lets us recover when the connection servicing this call
 /// (any of the pool's connections may pick it up) has never itself fetched
 /// the message's real mailbox - melib's `hash_index` is populated per
@@ -508,7 +582,7 @@ pub fn fetch_body(
     };
     let envelope = Envelope::from_bytes(&bytes, None)?;
     let attachment = envelope.body_bytes(&bytes);
-    let attachments = attachment_infos(&attachment);
+    let mut attachments = attachment_infos(&attachment);
 
     let from = envelope
         .from()
@@ -529,8 +603,10 @@ pub fn fetch_body(
 
     // Decision made here to favour HTML over raw text based as this is often
     // what the Sender intends, plain text shown only when there is no HTML version at all
-    let html = attachment.text(Text::Html);
+    let html = html_body(&attachment);
     let (body, is_html) = if !html.trim().is_empty() {
+        let (html, inlined) = inline_cid_images(html, &attachment);
+        attachments.retain(|a| !inlined.contains(&a.index));
         (html, true)
     } else {
         let plain = attachment.text(Text::Plain);
@@ -657,4 +733,40 @@ pub fn delete_all_messages(imap: &mut ImapType, mailbox_hash: MailboxHash) -> me
         return Ok(());
     };
     block_on(imap.delete_messages(batch, mailbox_hash)?)
+}
+
+#[cfg(test)]
+mod inline_image_tests {
+    use super::*;
+    use crate::smtp_client::{build_raw, OutgoingMessage};
+
+    #[test]
+    fn cid_images_are_inlined_and_hidden_from_attachments() {
+        let html = "<p>hi</p><img src=\"data:image/png;base64,iVBORw0KGgo=\" alt=\"logo\">";
+        let raw = build_raw(
+            &OutgoingMessage {
+                to: "a@example.com".into(),
+                cc: String::new(),
+                bcc: String::new(),
+                subject: "s".into(),
+                body_html: html.into(),
+                body_text: "t".into(),
+                in_reply_to: String::new(),
+                references: String::new(),
+                attachments: Vec::new(),
+            },
+            "me@example.com",
+            false,
+        );
+        let envelope = Envelope::from_bytes(raw.as_bytes(), None).unwrap();
+        let body = envelope.body_bytes(raw.as_bytes());
+        let text = html_body(&body);
+        assert!(text.contains("cid:"), "sent HTML should reference cid: {text}");
+        let infos = attachment_infos(&body);
+        assert_eq!(infos.len(), 1, "inline image is listed before inlining");
+        let (out, inlined) = inline_cid_images(text, &body);
+        assert!(out.contains("data:image/png;base64,"));
+        assert!(!out.contains("cid:"));
+        assert_eq!(inlined, vec![0]);
+    }
 }

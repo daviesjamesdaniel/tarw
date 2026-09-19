@@ -2008,3 +2008,13 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.image-bar {
+  flex-wrap: wrap;
+}
+
+.image-bar-alt {
+  flex: 1;
+  min-width: 6rem;
+  font-size: 0.75rem;
+}
