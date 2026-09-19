@@ -193,7 +193,7 @@ jobs:
   # its `needs` fails) - a broken build on any distro stops the release
   # before it's published, rather than relying on remembering to check.
   publish-release:
-    needs: [arch, debian, fedora, nix]
+    needs: [fmt, arch, debian, fedora, nix]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
