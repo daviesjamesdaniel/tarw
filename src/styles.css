@@ -1945,3 +1945,40 @@ body {
   font-size: 0.85rem;
   padding: 0.5rem 1rem;
 }
+
+.link-dialog-body {
+  padding: 0.75rem 1rem;
+}
+
+.link-dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.link-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+  background: rgba(128, 128, 128, 0.08);
+}
+
+.link-bar[hidden] {
+  display: none;
+}
+
+.link-bar-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+.link-bar-button {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.5rem;
+}

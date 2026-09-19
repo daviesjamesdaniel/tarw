@@ -1,3 +1,5 @@
+import { escapeHtml, htmlToPlainText, attachLinkBar, insertLinkInEditor } from "./richtext.js";
+
 const { invoke } = window.__TAURI__.core;
 const { emit } = window.__TAURI__.event;
 const currentWindow = window.__TAURI__.window.getCurrentWindow();
@@ -37,27 +39,6 @@ let composeForwardAttachments = null;
 // Tauri commands - see gatherComposeFields()/resolve_outgoing_attachments.
 let composeLocalAttachments = [];
 const recipientAddressBook = new Map();
-
-function escapeHtml(s) {
-  const div = document.createElement("div");
-  div.textContent = s;
-  return div.innerHTML;
-}
-
-function htmlToPlainText(html) {
-  const scratch = document.createElement("div");
-  scratch.innerHTML = html;
-  scratch.querySelectorAll("script, style").forEach((el) => el.remove());
-  scratch.querySelectorAll("img").forEach((img) => {
-    const label = img.getAttribute("alt")?.trim() || img.getAttribute("src")?.split("/").pop() || "image";
-    img.replaceWith(`[Image: ${label}]`);
-  });
-  scratch.querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
-  scratch.querySelectorAll("p, div, tr, li, h1, h2, h3, h4, h5, h6").forEach((el) => {
-    el.append("\n");
-  });
-  return scratch.textContent.replace(/\n{3,}/g, "\n\n").trim();
-}
 
 function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -190,6 +171,7 @@ function initComposeBodyDoc() {
   });
 }
 initComposeBodyDoc();
+attachLinkBar(composeBodyEl, (url) => invoke("open_external_url", { url }));
 
 composeToolbarEl.addEventListener("click", (e) => {
   const button = e.target.closest("button[data-cmd]");
@@ -198,20 +180,7 @@ composeToolbarEl.addEventListener("click", (e) => {
   composeBodyEl.contentDocument.execCommand(button.dataset.cmd, false, null);
 });
 
-composeLinkButtonEl.addEventListener("click", () => {
-  const doc = composeBodyEl.contentDocument;
-  const win = composeBodyEl.contentWindow;
-  win.focus();
-  const hasSelection = (win.getSelection()?.toString() ?? "").trim().length > 0;
-  const url = prompt("Link URL:");
-  if (!url) return;
-  if (hasSelection) {
-    doc.execCommand("createLink", false, url);
-  } else {
-    const safeUrl = escapeHtml(url);
-    doc.execCommand("insertHTML", false, `<a href="${safeUrl}">${safeUrl}</a>`);
-  }
-});
+composeLinkButtonEl.addEventListener("click", () => insertLinkInEditor(composeBodyEl));
 
 composeTextColorEl.addEventListener("input", (e) => {
   composeBodyEl.contentWindow.focus();
@@ -374,8 +343,11 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") currentWindow.close();
 });
 
-function gatherComposeFields() {
-  const bodyHtml = getComposeBodyHtml();
+// The signature marker is only for toggling it in-editor, so drafts keep it
+// but the copy that goes out over SMTP doesn't carry it.
+function gatherComposeFields({ forSend = false } = {}) {
+  let bodyHtml = getComposeBodyHtml();
+  if (forSend) bodyHtml = bodyHtml.replaceAll(` ${SIGNATURE_MARKER}="1"`, "");
   return {
     account: composeAccountEl.value,
     to: composeToEl.value,
@@ -402,7 +374,7 @@ composeFormEl.addEventListener("submit", async (e) => {
   composeSendEl.disabled = true;
   composeSendEl.textContent = "Sending…";
   try {
-    await invoke("send_message", gatherComposeFields());
+    await invoke("send_message", gatherComposeFields({ forSend: true }));
     await emit("mail-sent", { editingDraft });
     currentWindow.close();
   } catch (err) {

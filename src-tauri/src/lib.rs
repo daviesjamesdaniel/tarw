@@ -892,6 +892,15 @@ fn list_accounts(app: tauri::AppHandle) -> Result<Vec<accounts::AccountRecord>, 
 }
 
 #[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let lower = url.trim().to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("mailto:")) {
+        return Err("Unsupported link scheme".to_string());
+    }
+    tauri_plugin_opener::open_url(url.trim(), None::<&str>).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn update_account_signature(
     app: tauri::AppHandle,
     email: String,
@@ -1350,7 +1359,8 @@ pub fn run() {
             take_pending_compose,
             clear_notification_for_message,
             read_attachment_file,
-            update_account_signature
+            update_account_signature,
+            open_external_url
         ])
         .setup(|app| {
             // Populate state.providers (and start watchers/keepalive) before the window/webview

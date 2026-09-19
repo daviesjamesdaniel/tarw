@@ -1,3 +1,5 @@
+import { attachLinkBar, insertLinkInEditor, sanitizeHtml } from "./richtext.js";
+
 const { invoke } = window.__TAURI__.core;
 
 const statusEl = document.getElementById("status");
@@ -1707,6 +1709,8 @@ const signatureBodyEl = document.getElementById("signature-body");
 const signatureOnRepliesEl = document.getElementById("signature-on-replies");
 let signatureEditingEmail = null;
 
+attachLinkBar(document.getElementById("signature-body"), (url) => invoke("open_external_url", { url }));
+
 function initSignatureDoc(html) {
   const doc = signatureBodyEl.contentDocument;
   doc.open();
@@ -1742,20 +1746,7 @@ document.getElementById("signature-toolbar").addEventListener("click", (e) => {
   signatureBodyEl.contentDocument.execCommand(button.dataset.cmd, false, null);
 });
 
-document.getElementById("signature-link-button").addEventListener("click", () => {
-  const doc = signatureBodyEl.contentDocument;
-  const win = signatureBodyEl.contentWindow;
-  win.focus();
-  const hasSelection = (win.getSelection()?.toString() ?? "").trim().length > 0;
-  const url = prompt("Link URL:");
-  if (!url) return;
-  if (hasSelection) {
-    doc.execCommand("createLink", false, url);
-  } else {
-    const safeUrl = escapeHtml(url);
-    doc.execCommand("insertHTML", false, `<a href="${safeUrl}">${safeUrl}</a>`);
-  }
-});
+document.getElementById("signature-link-button").addEventListener("click", () => insertLinkInEditor(signatureBodyEl));
 
 document.getElementById("signature-close").addEventListener("click", closeSignatureEditor);
 document.getElementById("signature-cancel").addEventListener("click", closeSignatureEditor);
@@ -1764,7 +1755,7 @@ document.getElementById("signature-save").addEventListener("click", async () => 
   const email = signatureEditingEmail;
   if (!email) return;
   const body = signatureBodyEl.contentDocument.body;
-  const html = body.textContent.trim() === "" && !body.querySelector("img") ? null : body.innerHTML;
+  const html = body.textContent.trim() === "" && !body.querySelector("img") ? null : sanitizeHtml(body.innerHTML);
   try {
     await invoke("update_account_signature", {
       email,
