@@ -132,6 +132,30 @@
       </div>
     </div>
 
+    <div id="signature-overlay" class="compose-overlay" hidden>
+      <div class="compose-panel signature-editor-panel">
+        <div class="compose-header">
+          <span id="signature-title">Signature</span>
+          <button type="button" id="signature-close" class="compose-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="compose-toolbar" id="signature-toolbar">
+          <button type="button" class="compose-tool" data-cmd="bold" title="Bold"><b>B</b></button>
+          <button type="button" class="compose-tool" data-cmd="italic" title="Italic"><i>I</i></button>
+          <button type="button" class="compose-tool" data-cmd="underline" title="Underline"><u>U</u></button>
+          <button type="button" class="compose-tool" data-cmd="insertUnorderedList" title="Bulleted list">&#8226;</button>
+          <button type="button" class="compose-tool" id="signature-link-button" title="Insert link">&#128279;</button>
+        </div>
+        <iframe id="signature-body" class="compose-body" sandbox="allow-same-origin"></iframe>
+        <label class="signature-replies-option">
+          <input type="checkbox" id="signature-on-replies" /> Include on replies and forwards
+        </label>
+        <div class="compose-footer">
+          <button type="button" id="signature-cancel" class="compose-secondary">Cancel</button>
+          <button type="button" id="signature-save" class="compose-send">Save</button>
+        </div>
+      </div>
+    </div>
+
     <div id="remove-account-overlay" class="compose-overlay" hidden>
       <form id="remove-account-form" class="compose-panel create-mailbox-panel">
         <div class="compose-header">

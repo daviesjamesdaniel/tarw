@@ -1917,3 +1917,31 @@ body {
     transform: translateY(0.25rem);
   }
 }
+
+.compose-signature-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0 0.3rem;
+}
+
+.signature-editor-panel {
+  width: min(34rem, 92vw);
+}
+
+.signature-editor-panel .compose-body {
+  min-height: 9rem;
+  max-height: 16rem;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 4px;
+}
+
+.signature-replies-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+}

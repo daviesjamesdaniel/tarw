@@ -15,6 +15,8 @@ const composeShowBccEl = document.getElementById("compose-show-bcc");
 const composeSubjectEl = document.getElementById("compose-subject");
 const composeBodyEl = document.getElementById("compose-body");
 const composeToolbarEl = document.getElementById("compose-toolbar");
+const composeSignatureToggleEl = document.getElementById("compose-signature-toggle");
+const composeSignatureLabelEl = document.getElementById("compose-signature-label");
 const composeLinkButtonEl = document.getElementById("compose-link-button");
 const composeTextColorEl = document.getElementById("compose-text-color");
 const composeHighlightColorEl = document.getElementById("compose-highlight-color");
@@ -229,6 +231,37 @@ function getComposeBodyHtml() {
   return composeBodyEl.contentDocument.body.innerHTML;
 }
 
+const SIGNATURE_MARKER = "data-tarw-signature";
+let composeAccounts = [];
+let composeIsReplyLike = false;
+
+function accountSignature(email) {
+  const acct = composeAccounts.find((a) => a.email === email);
+  return acct?.signature_html ? acct : null;
+}
+
+// Signature lives in a marker div so it can be swapped or toggled out again
+// (account change, checkbox) without disturbing what the user has typed.
+// On replies/forwards it goes right after the first (typed-reply) paragraph,
+// above the quoted original; on new messages it goes at the end.
+function applyComposeSignature(email, include) {
+  const body = composeBodyEl.contentDocument.body;
+  body.querySelectorAll(`[${SIGNATURE_MARKER}]`).forEach((el) => el.remove());
+  const acct = accountSignature(email);
+  if (!include || !acct) return;
+  const block = composeBodyEl.contentDocument.createElement("div");
+  block.setAttribute(SIGNATURE_MARKER, "1");
+  block.innerHTML = `<br>-- <br>${acct.signature_html}`;
+  const anchor = composeIsReplyLike ? body.firstElementChild : null;
+  if (anchor) anchor.after(block);
+  else body.appendChild(block);
+}
+
+function syncSignatureControl() {
+  const acct = accountSignature(composeAccountEl.value);
+  composeSignatureLabelEl.hidden = !acct;
+}
+
 function placeComposeCaretAtStart() {
   const doc = composeBodyEl.contentDocument;
   const win = composeBodyEl.contentWindow;
@@ -440,4 +473,30 @@ composeSaveDraftEl.addEventListener("click", async () => {
     .join("");
   composeAccountEl.value = accounts.some((a) => a.email === desired) ? desired : (accounts[0]?.email ?? "");
   composeAccountFieldEl.hidden = accounts.length < 2;
+
+  composeAccounts = accounts;
+  composeIsReplyLike = !!prefill?.mode;
+  const hasSignatureBlock =
+    composeBodyEl.contentDocument.body.querySelector(`[${SIGNATURE_MARKER}]`) !== null;
+  if (editingDraft) {
+    composeSignatureToggleEl.checked = hasSignatureBlock;
+  } else {
+    const acct = accountSignature(composeAccountEl.value);
+    composeSignatureToggleEl.checked = !!acct && (!composeIsReplyLike || acct.signature_on_replies);
+    applyComposeSignature(composeAccountEl.value, composeSignatureToggleEl.checked);
+  }
+  syncSignatureControl();
 })();
+
+composeSignatureToggleEl.addEventListener("change", () => {
+  applyComposeSignature(composeAccountEl.value, composeSignatureToggleEl.checked);
+});
+
+composeAccountEl.addEventListener("change", () => {
+  const acct = accountSignature(composeAccountEl.value);
+  if (!editingDraft) {
+    composeSignatureToggleEl.checked = !!acct && (!composeIsReplyLike || acct.signature_on_replies);
+  }
+  applyComposeSignature(composeAccountEl.value, composeSignatureToggleEl.checked);
+  syncSignatureControl();
+});

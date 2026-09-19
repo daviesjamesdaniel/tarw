@@ -25,6 +25,12 @@ pub struct AccountRecord {
     pub email: String,
     pub display_name: Option<String>,
     pub provider: AccountProvider,
+    // #[serde(default)] on both so an existing accounts.json written before
+    // signatures existed still loads cleanly instead of failing to parse.
+    #[serde(default)]
+    pub signature_html: Option<String>,
+    #[serde(default)]
+    pub signature_on_replies: bool,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -77,7 +83,25 @@ pub fn add(app: &tauri::AppHandle, email: &str, provider: AccountProvider) -> me
         email: email.to_string(),
         display_name: None,
         provider,
+        signature_html: None,
+        signature_on_replies: false,
     });
+    save(app, &accounts)
+}
+
+pub fn update_signature(
+    app: &tauri::AppHandle,
+    email: &str,
+    signature_html: Option<String>,
+    signature_on_replies: bool,
+) -> melib::Result<()> {
+    let mut accounts = load(app)?;
+    let account = accounts
+        .iter_mut()
+        .find(|a| a.email == email)
+        .ok_or_else(|| melib::error::Error::new(format!("No account {email}")))?;
+    account.signature_html = signature_html;
+    account.signature_on_replies = signature_on_replies;
     save(app, &accounts)
 }
 

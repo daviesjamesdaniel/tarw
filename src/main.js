@@ -400,6 +400,7 @@ const ICONS = {
   download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`,
   gear: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
   hamburger: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg>`,
+  signature: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17c3-6 5-9 6-9s0 6 2 6 3-4 4-4 1 3 3 3"/><line x1="3" y1="21" x2="21" y2="21"/></svg>`,
   pencil: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>`,
   coffee: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><path d="M6 2v2"/><path d="M10 2v2"/><path d="M14 2v2"/></svg>`,
   plusCircle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>`,
@@ -1677,6 +1678,7 @@ function renderSettingsAccountRows(container, accountList) {
     row.className = "settings-panel-account-row";
     if (!unifiedActive && acct.email === activeAccount) row.classList.add("active");
     row.innerHTML = `<span class="settings-panel-account-email">${escapeHtml(acct.email)}</span>
+      <button type="button" class="settings-panel-icon-button settings-edit-signature" title="Signature" aria-label="Signature">${ICONS.signature}</button>
       <button type="button" class="settings-panel-icon-button settings-edit-account" title="Edit account" aria-label="Edit account">${ICONS.pencil}</button>
       <button type="button" class="settings-panel-icon-button settings-panel-icon-button-danger settings-remove-account" title="Remove account" aria-label="Remove account">${ICONS.delete}</button>`;
     row.addEventListener("click", () => {
@@ -1684,6 +1686,10 @@ function renderSettingsAccountRows(container, accountList) {
       switchAccount(acct.email);
     });
 
+    row.querySelector(".settings-edit-signature").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openSignatureEditor(acct);
+    });
     row.querySelector(".settings-edit-account").addEventListener("click", (e) => {
       e.stopPropagation();
       openEditAccountModal(acct);
@@ -1695,6 +1701,83 @@ function renderSettingsAccountRows(container, accountList) {
     container.appendChild(row);
   }
 }
+
+const signatureOverlayEl = document.getElementById("signature-overlay");
+const signatureBodyEl = document.getElementById("signature-body");
+const signatureOnRepliesEl = document.getElementById("signature-on-replies");
+let signatureEditingEmail = null;
+
+function initSignatureDoc(html) {
+  const doc = signatureBodyEl.contentDocument;
+  doc.open();
+  doc.write(
+    "<!doctype html><html><head><style>" +
+      "html,body{margin:0;padding:0.6rem;background:Canvas;color:CanvasText;" +
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:0.88rem;}' +
+      "img{max-width:100%;}" +
+      '</style></head><body contenteditable="true"></body></html>',
+  );
+  doc.close();
+  doc.body.innerHTML = html;
+}
+
+function openSignatureEditor(acct) {
+  signatureEditingEmail = acct.email;
+  document.getElementById("signature-title").textContent = `Signature for ${acct.email}`;
+  signatureOnRepliesEl.checked = !!acct.signature_on_replies;
+  signatureOverlayEl.hidden = false;
+  initSignatureDoc(acct.signature_html ?? "");
+  signatureBodyEl.contentWindow.focus();
+}
+
+function closeSignatureEditor() {
+  signatureOverlayEl.hidden = true;
+  signatureEditingEmail = null;
+}
+
+document.getElementById("signature-toolbar").addEventListener("click", (e) => {
+  const button = e.target.closest("button[data-cmd]");
+  if (!button) return;
+  signatureBodyEl.contentWindow.focus();
+  signatureBodyEl.contentDocument.execCommand(button.dataset.cmd, false, null);
+});
+
+document.getElementById("signature-link-button").addEventListener("click", () => {
+  const doc = signatureBodyEl.contentDocument;
+  const win = signatureBodyEl.contentWindow;
+  win.focus();
+  const hasSelection = (win.getSelection()?.toString() ?? "").trim().length > 0;
+  const url = prompt("Link URL:");
+  if (!url) return;
+  if (hasSelection) {
+    doc.execCommand("createLink", false, url);
+  } else {
+    const safeUrl = escapeHtml(url);
+    doc.execCommand("insertHTML", false, `<a href="${safeUrl}">${safeUrl}</a>`);
+  }
+});
+
+document.getElementById("signature-close").addEventListener("click", closeSignatureEditor);
+document.getElementById("signature-cancel").addEventListener("click", closeSignatureEditor);
+
+document.getElementById("signature-save").addEventListener("click", async () => {
+  const email = signatureEditingEmail;
+  if (!email) return;
+  const body = signatureBodyEl.contentDocument.body;
+  const html = body.textContent.trim() === "" && !body.querySelector("img") ? null : body.innerHTML;
+  try {
+    await invoke("update_account_signature", {
+      email,
+      signatureHtml: html,
+      signatureOnReplies: signatureOnRepliesEl.checked,
+    });
+  } catch (err) {
+    console.error("update_account_signature failed", err);
+    showErrorToast(`Couldn't save signature: ${err}`);
+    return;
+  }
+  closeSignatureEditor();
+});
 
 async function switchAccount(email) {
   const wasViewingSearch = !searchResultsEl.hidden;

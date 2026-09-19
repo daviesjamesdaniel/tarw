@@ -891,6 +891,17 @@ fn list_accounts(app: tauri::AppHandle) -> Result<Vec<accounts::AccountRecord>, 
     accounts::load(&app).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn update_account_signature(
+    app: tauri::AppHandle,
+    email: String,
+    signature_html: Option<String>,
+    signature_on_replies: bool,
+) -> Result<(), String> {
+    accounts::update_signature(&app, &email, signature_html, signature_on_replies)
+        .map_err(|e| e.to_string())
+}
+
 // The composer is a real OS window (resizable/maximizable/minimizable independently of
 // "main") rather than an in-page overlay, so it can't just read prefill data out of the
 // main window's DOM/JS state. Each open gets a uniquely labelled window and its prefill
@@ -1131,13 +1142,21 @@ async fn add_account(
             flags.insert(email.clone(), stop_flag.clone());
         }
         spawn_watcher(app.clone(), email.clone(), stop_flag.clone());
-        spawn_keepalive(app, email.clone(), stop_flag);
+        spawn_keepalive(app.clone(), email.clone(), stop_flag);
 
-        Ok(accounts::AccountRecord {
+        // Re-read the saved record rather than constructing a fresh one, so
+        // re-authenticating an existing account doesn't report its
+        // signature as unset.
+        let saved = accounts::load(&app)
+            .ok()
+            .and_then(|list| list.into_iter().find(|a| a.email == email));
+        Ok(saved.unwrap_or(accounts::AccountRecord {
             email,
             display_name: None,
             provider: account_provider,
-        })
+            signature_html: None,
+            signature_on_replies: false,
+        }))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1330,7 +1349,8 @@ pub fn run() {
             open_compose_window,
             take_pending_compose,
             clear_notification_for_message,
-            read_attachment_file
+            read_attachment_file,
+            update_account_signature
         ])
         .setup(|app| {
             // Populate state.providers (and start watchers/keepalive) before the window/webview
