@@ -138,6 +138,12 @@
           <span id="signature-title">Signature</span>
           <button type="button" id="signature-close" class="compose-close" aria-label="Close">&times;</button>
         </div>
+        <div class="signature-picker">
+          <select id="signature-select" aria-label="Signature"></select>
+          <button type="button" id="signature-new" class="compose-secondary">New</button>
+          <button type="button" id="signature-delete" class="compose-secondary">Delete</button>
+          <input type="text" id="signature-name" placeholder="Name" spellcheck="false" />
+        </div>
         <div class="compose-toolbar" id="signature-toolbar">
           <button type="button" class="compose-tool" data-cmd="bold" title="Bold"><b>B</b></button>
           <button type="button" class="compose-tool" data-cmd="italic" title="Italic"><i>I</i></button>
@@ -147,7 +153,10 @@
         </div>
         <iframe id="signature-body" class="compose-body" sandbox="allow-same-origin"></iframe>
         <label class="signature-replies-option">
-          <input type="checkbox" id="signature-on-replies" /> Include on replies and forwards
+          <input type="checkbox" id="signature-is-default" /> Use this one by default
+        </label>
+        <label class="signature-replies-option">
+          <input type="checkbox" id="signature-on-replies" /> Include a signature on replies and forwards
         </label>
         <div class="compose-footer">
           <button type="button" id="signature-cancel" class="compose-secondary">Cancel</button>

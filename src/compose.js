@@ -19,6 +19,7 @@ const composeBodyEl = document.getElementById("compose-body");
 const composeToolbarEl = document.getElementById("compose-toolbar");
 const composeSignatureToggleEl = document.getElementById("compose-signature-toggle");
 const composeSignatureLabelEl = document.getElementById("compose-signature-label");
+const composeSignatureSelectEl = document.getElementById("compose-signature-select");
 const composeLinkButtonEl = document.getElementById("compose-link-button");
 const composeTextColorEl = document.getElementById("compose-text-color");
 const composeHighlightColorEl = document.getElementById("compose-highlight-color");
@@ -204,31 +205,56 @@ const SIGNATURE_MARKER = "data-tarw-signature";
 let composeAccounts = [];
 let composeIsReplyLike = false;
 
-function accountSignature(email) {
+function accountWithSignatures(email) {
   const acct = composeAccounts.find((a) => a.email === email);
-  return acct?.signature_html ? acct : null;
+  return acct?.signatures?.length > 0 ? acct : null;
 }
 
-// Signature lives in a marker div so it can be swapped or toggled out again
-// (account change, checkbox) without disturbing what the user has typed.
-// On replies/forwards it goes right after the first (typed-reply) paragraph,
-// above the quoted original; on new messages it goes at the end.
-function applyComposeSignature(email, include) {
+// Signature lives in a marker div (its value is the signature's id) so it can
+// be swapped or removed again (account change, checkbox, dropdown) without
+// disturbing what the user has typed. On replies/forwards it goes right after
+// the first (typed-reply) paragraph, above the quoted original; on new
+// messages it goes at the end.
+function applyComposeSignature(email, signatureId) {
   const body = composeBodyEl.contentDocument.body;
   body.querySelectorAll(`[${SIGNATURE_MARKER}]`).forEach((el) => el.remove());
-  const acct = accountSignature(email);
-  if (!include || !acct) return;
+  const sig = accountWithSignatures(email)?.signatures.find((s) => s.id === signatureId);
+  if (!sig) return;
   const block = composeBodyEl.contentDocument.createElement("div");
-  block.setAttribute(SIGNATURE_MARKER, "1");
-  block.innerHTML = `<br>-- <br>${acct.signature_html}`;
+  block.setAttribute(SIGNATURE_MARKER, sig.id);
+  block.innerHTML = `<br>-- <br>${sig.html}`;
   const anchor = composeIsReplyLike ? body.firstElementChild : null;
   if (anchor) anchor.after(block);
   else body.appendChild(block);
 }
 
+function fillSignatureSelect(email, selectedId) {
+  const acct = accountWithSignatures(email);
+  composeSignatureSelectEl.innerHTML = (acct?.signatures ?? [])
+    .map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`)
+    .join("");
+  const ids = (acct?.signatures ?? []).map((s) => s.id);
+  composeSignatureSelectEl.value = ids.includes(selectedId) ? selectedId : (acct?.default_signature_id ?? ids[0] ?? "");
+}
+
+// The checkbox stays visible so signatures are discoverable, but is disabled
+// (with an explanation) when the chosen account has none. The dropdown only
+// shows when it's ticked and there is a choice to make.
 function syncSignatureControl() {
-  const acct = accountSignature(composeAccountEl.value);
-  composeSignatureLabelEl.hidden = !acct;
+  const acct = accountWithSignatures(composeAccountEl.value);
+  composeSignatureToggleEl.disabled = !acct;
+  if (!acct) composeSignatureToggleEl.checked = false;
+  composeSignatureLabelEl.title = acct
+    ? ""
+    : "No signature set for this account - add one in Settings (signature icon next to the account)";
+  composeSignatureLabelEl.classList.toggle("compose-signature-disabled", !acct);
+  composeSignatureSelectEl.hidden = !acct || !composeSignatureToggleEl.checked || acct.signatures.length < 2;
+}
+
+function refreshComposeSignature() {
+  const email = composeAccountEl.value;
+  applyComposeSignature(email, composeSignatureToggleEl.checked ? composeSignatureSelectEl.value : null);
+  syncSignatureControl();
 }
 
 function placeComposeCaretAtStart() {
@@ -347,7 +373,7 @@ document.addEventListener("keydown", (e) => {
 // but the copy that goes out over SMTP doesn't carry it.
 function gatherComposeFields({ forSend = false } = {}) {
   let bodyHtml = getComposeBodyHtml();
-  if (forSend) bodyHtml = bodyHtml.replaceAll(` ${SIGNATURE_MARKER}="1"`, "");
+  if (forSend) bodyHtml = bodyHtml.replace(new RegExp(` ${SIGNATURE_MARKER}="[^"]*"`, "g"), "");
   return {
     account: composeAccountEl.value,
     to: composeToEl.value,
@@ -448,27 +474,29 @@ composeSaveDraftEl.addEventListener("click", async () => {
 
   composeAccounts = accounts;
   composeIsReplyLike = !!prefill?.mode;
-  const hasSignatureBlock =
-    composeBodyEl.contentDocument.body.querySelector(`[${SIGNATURE_MARKER}]`) !== null;
+  const existing = composeBodyEl.contentDocument.body.querySelector(`[${SIGNATURE_MARKER}]`);
+  const acct = accountWithSignatures(composeAccountEl.value);
   if (editingDraft) {
-    composeSignatureToggleEl.checked = hasSignatureBlock;
+    // Reopened draft: keep the saved signature block exactly as it was and
+    // just reflect it in the controls.
+    composeSignatureToggleEl.checked = existing !== null;
+    fillSignatureSelect(composeAccountEl.value, existing?.getAttribute(SIGNATURE_MARKER));
+    syncSignatureControl();
   } else {
-    const acct = accountSignature(composeAccountEl.value);
     composeSignatureToggleEl.checked = !!acct && (!composeIsReplyLike || acct.signature_on_replies);
-    applyComposeSignature(composeAccountEl.value, composeSignatureToggleEl.checked);
+    fillSignatureSelect(composeAccountEl.value, null);
+    refreshComposeSignature();
   }
-  syncSignatureControl();
 })();
 
-composeSignatureToggleEl.addEventListener("change", () => {
-  applyComposeSignature(composeAccountEl.value, composeSignatureToggleEl.checked);
-});
+composeSignatureToggleEl.addEventListener("change", refreshComposeSignature);
+composeSignatureSelectEl.addEventListener("change", refreshComposeSignature);
 
 composeAccountEl.addEventListener("change", () => {
-  const acct = accountSignature(composeAccountEl.value);
+  const acct = accountWithSignatures(composeAccountEl.value);
   if (!editingDraft) {
     composeSignatureToggleEl.checked = !!acct && (!composeIsReplyLike || acct.signature_on_replies);
   }
-  applyComposeSignature(composeAccountEl.value, composeSignatureToggleEl.checked);
-  syncSignatureControl();
+  fillSignatureSelect(composeAccountEl.value, null);
+  refreshComposeSignature();
 });

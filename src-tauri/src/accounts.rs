@@ -21,16 +21,56 @@ impl AccountProvider {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Signature {
+    pub id: String,
+    pub name: String,
+    pub html: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AccountRecord {
     pub email: String,
     pub display_name: Option<String>,
     pub provider: AccountProvider,
-    // #[serde(default)] on both so an existing accounts.json written before
+    // #[serde(default)] on all of these so an accounts.json written before
     // signatures existed still loads cleanly instead of failing to parse.
     #[serde(default)]
-    pub signature_html: Option<String>,
+    pub signatures: Vec<Signature>,
+    #[serde(default)]
+    pub default_signature_id: Option<String>,
     #[serde(default)]
     pub signature_on_replies: bool,
+    // The pre-multiple-signatures single signature. Read once so old data can
+    // be migrated in load(), never written back.
+    #[serde(default, skip_serializing)]
+    signature_html: Option<String>,
+}
+
+impl AccountRecord {
+    pub fn new(email: String, display_name: Option<String>, provider: AccountProvider) -> Self {
+        Self {
+            email,
+            display_name,
+            provider,
+            signatures: Vec::new(),
+            default_signature_id: None,
+            signature_on_replies: false,
+            signature_html: None,
+        }
+    }
+
+    fn migrate_legacy_signature(&mut self) {
+        if let Some(html) = self.signature_html.take() {
+            if self.signatures.is_empty() && !html.trim().is_empty() {
+                self.signatures.push(Signature {
+                    id: "default".to_string(),
+                    name: "Default".to_string(),
+                    html,
+                });
+                self.default_signature_id = Some("default".to_string());
+            }
+        }
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -58,7 +98,11 @@ pub fn load(app: &tauri::AppHandle) -> melib::Result<Vec<AccountRecord>> {
     let file: AccountsFile = serde_json::from_str(&contents).map_err(|e| {
         melib::error::Error::new(format!("Could not parse {}: {e}", path.display()))
     })?;
-    Ok(file.accounts)
+    let mut accounts = file.accounts;
+    for account in &mut accounts {
+        account.migrate_legacy_signature();
+    }
+    Ok(accounts)
 }
 
 fn save(app: &tauri::AppHandle, accounts: &[AccountRecord]) -> melib::Result<()> {
@@ -79,20 +123,15 @@ pub fn add(app: &tauri::AppHandle, email: &str, provider: AccountProvider) -> me
         existing.provider = provider;
         return save(app, &accounts);
     }
-    accounts.push(AccountRecord {
-        email: email.to_string(),
-        display_name: None,
-        provider,
-        signature_html: None,
-        signature_on_replies: false,
-    });
+    accounts.push(AccountRecord::new(email.to_string(), None, provider));
     save(app, &accounts)
 }
 
-pub fn update_signature(
+pub fn update_signatures(
     app: &tauri::AppHandle,
     email: &str,
-    signature_html: Option<String>,
+    signatures: Vec<Signature>,
+    default_signature_id: Option<String>,
     signature_on_replies: bool,
 ) -> melib::Result<()> {
     let mut accounts = load(app)?;
@@ -100,8 +139,10 @@ pub fn update_signature(
         .iter_mut()
         .find(|a| a.email == email)
         .ok_or_else(|| melib::error::Error::new(format!("No account {email}")))?;
-    account.signature_html = signature_html;
+    let known = |id: &Option<String>| id.clone().filter(|id| signatures.iter().any(|s| &s.id == id));
+    account.default_signature_id = known(&default_signature_id);
     account.signature_on_replies = signature_on_replies;
+    account.signatures = signatures;
     save(app, &accounts)
 }
 

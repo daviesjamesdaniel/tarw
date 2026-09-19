@@ -901,14 +901,21 @@ fn open_external_url(url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn update_account_signature(
+fn update_account_signatures(
     app: tauri::AppHandle,
     email: String,
-    signature_html: Option<String>,
+    signatures: Vec<accounts::Signature>,
+    default_signature_id: Option<String>,
     signature_on_replies: bool,
 ) -> Result<(), String> {
-    accounts::update_signature(&app, &email, signature_html, signature_on_replies)
-        .map_err(|e| e.to_string())
+    accounts::update_signatures(
+        &app,
+        &email,
+        signatures,
+        default_signature_id,
+        signature_on_replies,
+    )
+    .map_err(|e| e.to_string())
 }
 
 // The composer is a real OS window (resizable/maximizable/minimizable independently of
@@ -1159,13 +1166,11 @@ async fn add_account(
         let saved = accounts::load(&app)
             .ok()
             .and_then(|list| list.into_iter().find(|a| a.email == email));
-        Ok(saved.unwrap_or(accounts::AccountRecord {
+        Ok(saved.unwrap_or(accounts::AccountRecord::new(
             email,
-            display_name: None,
-            provider: account_provider,
-            signature_html: None,
-            signature_on_replies: false,
-        }))
+            None,
+            account_provider,
+        )))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1359,7 +1364,7 @@ pub fn run() {
             take_pending_compose,
             clear_notification_for_message,
             read_attachment_file,
-            update_account_signature,
+            update_account_signatures,
             open_external_url
         ])
         .setup(|app| {

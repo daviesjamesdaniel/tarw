@@ -1982,3 +1982,29 @@ body {
   font-size: 0.75rem;
   padding: 0.1rem 0.5rem;
 }
+
+.signature-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+}
+
+.signature-picker select {
+  max-width: 12rem;
+}
+
+.signature-picker input[type="text"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.compose-signature-select {
+  font-size: 0.8rem;
+  max-width: 10rem;
+}
+
+.compose-signature-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -1706,12 +1706,18 @@ function renderSettingsAccountRows(container, accountList) {
 
 const signatureOverlayEl = document.getElementById("signature-overlay");
 const signatureBodyEl = document.getElementById("signature-body");
+const signatureSelectEl = document.getElementById("signature-select");
+const signatureNameEl = document.getElementById("signature-name");
+const signatureIsDefaultEl = document.getElementById("signature-is-default");
 const signatureOnRepliesEl = document.getElementById("signature-on-replies");
 let signatureEditingEmail = null;
+// Working copy edited in the modal; only written back on Save.
+let signatureDraft = null;
+let signatureCurrentId = null;
 
-attachLinkBar(document.getElementById("signature-body"), (url) => invoke("open_external_url", { url }));
+attachLinkBar(signatureBodyEl, (url) => invoke("open_external_url", { url }));
 
-function initSignatureDoc(html) {
+function initSignatureDoc() {
   const doc = signatureBodyEl.contentDocument;
   doc.open();
   doc.write(
@@ -1722,22 +1728,96 @@ function initSignatureDoc(html) {
       '</style></head><body contenteditable="true"></body></html>',
   );
   doc.close();
-  doc.body.innerHTML = html;
+}
+
+function currentSignature() {
+  return signatureDraft.signatures.find((s) => s.id === signatureCurrentId) ?? null;
+}
+
+// Copies the editor's fields back into the working copy for whichever
+// signature is currently shown.
+function commitCurrentSignature() {
+  const sig = currentSignature();
+  if (!sig) return;
+  sig.name = signatureNameEl.value.trim() || sig.name;
+  sig.html = signatureBodyEl.contentDocument.body.innerHTML;
+  if (signatureIsDefaultEl.checked) signatureDraft.defaultId = sig.id;
+  else if (signatureDraft.defaultId === sig.id) signatureDraft.defaultId = null;
+}
+
+function renderSignatureSelect() {
+  signatureSelectEl.innerHTML = signatureDraft.signatures
+    .map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`)
+    .join("");
+  signatureSelectEl.value = signatureCurrentId;
+}
+
+function showSignature(id) {
+  signatureCurrentId = id;
+  const sig = currentSignature();
+  renderSignatureSelect();
+  signatureNameEl.value = sig?.name ?? "";
+  signatureBodyEl.contentDocument.body.innerHTML = sig?.html ?? "";
+  signatureIsDefaultEl.checked = signatureDraft.defaultId === id;
+  document.getElementById("signature-delete").disabled = !sig;
+}
+
+function addBlankSignature() {
+  const n = signatureDraft.signatures.length + 1;
+  const sig = { id: crypto.randomUUID(), name: n === 1 ? "Signature" : `Signature ${n}`, html: "" };
+  signatureDraft.signatures.push(sig);
+  if (signatureDraft.signatures.length === 1) signatureDraft.defaultId = sig.id;
+  return sig;
 }
 
 function openSignatureEditor(acct) {
   signatureEditingEmail = acct.email;
-  document.getElementById("signature-title").textContent = `Signature for ${acct.email}`;
+  document.getElementById("signature-title").textContent = `Signatures for ${acct.email}`;
+  signatureDraft = {
+    signatures: (acct.signatures ?? []).map((s) => ({ ...s })),
+    defaultId: acct.default_signature_id ?? null,
+  };
   signatureOnRepliesEl.checked = !!acct.signature_on_replies;
   signatureOverlayEl.hidden = false;
-  initSignatureDoc(acct.signature_html ?? "");
+  initSignatureDoc();
+  if (signatureDraft.signatures.length === 0) addBlankSignature();
+  showSignature(signatureDraft.signatures[0].id);
   signatureBodyEl.contentWindow.focus();
 }
 
 function closeSignatureEditor() {
   signatureOverlayEl.hidden = true;
   signatureEditingEmail = null;
+  signatureDraft = null;
+  signatureCurrentId = null;
 }
+
+signatureSelectEl.addEventListener("change", () => {
+  commitCurrentSignature();
+  showSignature(signatureSelectEl.value);
+});
+
+document.getElementById("signature-new").addEventListener("click", () => {
+  commitCurrentSignature();
+  showSignature(addBlankSignature().id);
+  signatureNameEl.select();
+});
+
+document.getElementById("signature-delete").addEventListener("click", () => {
+  const id = signatureCurrentId;
+  signatureDraft.signatures = signatureDraft.signatures.filter((s) => s.id !== id);
+  if (signatureDraft.defaultId === id) signatureDraft.defaultId = signatureDraft.signatures[0]?.id ?? null;
+  if (signatureDraft.signatures.length === 0) addBlankSignature();
+  showSignature(signatureDraft.signatures[0].id);
+});
+
+signatureNameEl.addEventListener("input", () => {
+  const sig = currentSignature();
+  if (!sig) return;
+  sig.name = signatureNameEl.value;
+  const option = [...signatureSelectEl.options].find((o) => o.value === sig.id);
+  if (option) option.textContent = signatureNameEl.value || "(unnamed)";
+});
 
 document.getElementById("signature-toolbar").addEventListener("click", (e) => {
   const button = e.target.closest("button[data-cmd]");
@@ -1754,17 +1834,29 @@ document.getElementById("signature-cancel").addEventListener("click", closeSigna
 document.getElementById("signature-save").addEventListener("click", async () => {
   const email = signatureEditingEmail;
   if (!email) return;
-  const body = signatureBodyEl.contentDocument.body;
-  const html = body.textContent.trim() === "" && !body.querySelector("img") ? null : sanitizeHtml(body.innerHTML);
+  commitCurrentSignature();
+  // Blank signatures (the untouched placeholder, or one emptied out) are dropped.
+  const signatures = signatureDraft.signatures
+    .map((s) => {
+      const scratch = document.createElement("div");
+      scratch.innerHTML = s.html;
+      const blank = scratch.textContent.trim() === "" && !scratch.querySelector("img");
+      return blank ? null : { id: s.id, name: s.name.trim() || "Signature", html: sanitizeHtml(s.html) };
+    })
+    .filter(Boolean);
+  const defaultId = signatures.some((s) => s.id === signatureDraft.defaultId)
+    ? signatureDraft.defaultId
+    : (signatures[0]?.id ?? null);
   try {
-    await invoke("update_account_signature", {
+    await invoke("update_account_signatures", {
       email,
-      signatureHtml: html,
+      signatures,
+      defaultSignatureId: defaultId,
       signatureOnReplies: signatureOnRepliesEl.checked,
     });
   } catch (err) {
-    console.error("update_account_signature failed", err);
-    showErrorToast(`Couldn't save signature: ${err}`);
+    console.error("update_account_signatures failed", err);
+    showErrorToast(`Couldn't save signatures: ${err}`);
     return;
   }
   closeSignatureEditor();
