@@ -56,6 +56,35 @@ fn provider_for(state: &AppState, account: &str) -> melib::Result<ProviderConfig
         .ok_or_else(|| melib::error::Error::new(format!("No provider config cached for {account}")))
 }
 
+/// A panic while a lock is held poisons it, and a plain `.lock().unwrap()` then panics on every
+/// later call - so one panic inside melib would leave an account failing until the app restarts.
+/// These take the lock regardless, clear the poison, and tell the caller it happened so a
+/// poisoned IMAP connection (whose state is unknown) can be replaced instead of reused.
+fn lock_flagging_poison<T>(m: &Mutex<T>) -> (std::sync::MutexGuard<'_, T>, bool) {
+    match m.lock() {
+        Ok(guard) => (guard, false),
+        Err(poisoned) => {
+            m.clear_poison();
+            (poisoned.into_inner(), true)
+        }
+    }
+}
+
+fn try_lock_flagging_poison<T>(m: &Mutex<T>) -> Option<(std::sync::MutexGuard<'_, T>, bool)> {
+    match m.try_lock() {
+        Ok(guard) => Some((guard, false)),
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => {
+            m.clear_poison();
+            Some((poisoned.into_inner(), true))
+        }
+        Err(std::sync::TryLockError::WouldBlock) => None,
+    }
+}
+
+fn lock_recovering<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    lock_flagging_poison(m).0
+}
+
 fn is_connection_dead(err: &melib::Error) -> bool {
     err.kind.is_disconnected()
         || err.kind.is_network()
@@ -88,10 +117,7 @@ fn is_unknown_mailbox(err: &melib::Error) -> bool {
 // first time something tries to use it. Refresh them all synchronously
 // right away instead, best-effort, so nothing has to pay that cost later.
 fn refresh_all_connections(state: &AppState, account: &str) {
-    let pool = state
-        .connections
-        .lock()
-        .unwrap()
+    let pool = lock_recovering(&state.connections)
         .get(account)
         .cloned()
         .unwrap_or_default();
@@ -111,13 +137,13 @@ fn with_connection<T>(
     f: impl Fn(&mut ImapType) -> melib::Result<T>,
 ) -> melib::Result<T> {
     let pool = {
-        let mut guard = state.connections.lock().unwrap();
+        let mut guard = lock_recovering(&state.connections);
         guard.entry(account.to_string()).or_default().clone()
     };
 
     for conn in &pool {
-        if let Ok(imap) = conn.try_lock() {
-            return run_on_slot(state, account, conn, imap, &f);
+        if let Some((imap, poisoned)) = try_lock_flagging_poison(conn) {
+            return run_on_slot(state, account, conn, imap, poisoned, &f);
         }
     }
 
@@ -130,19 +156,19 @@ fn with_connection<T>(
         // connecting. Only add ours if the pool is still actually under
         // capacity; otherwise just use this connection for this one call
         // without keeping it, so the shared pool never exceeds POOL_SIZE.
-        let mut guard = state.connections.lock().unwrap();
+        let mut guard = lock_recovering(&state.connections);
         let entry = guard.entry(account.to_string()).or_default();
         if entry.len() < POOL_SIZE {
             entry.push(fresh.clone());
         }
         drop(guard);
-        let imap = fresh.lock().unwrap();
-        return run_on_slot(state, account, &fresh, imap, &f);
+        let imap = lock_recovering(&fresh);
+        return run_on_slot(state, account, &fresh, imap, false, &f);
     }
 
     let conn = pool[0].clone();
-    let imap = conn.lock().unwrap();
-    run_on_slot(state, account, &conn, imap, &f)
+    let (imap, poisoned) = lock_flagging_poison(&conn);
+    run_on_slot(state, account, &conn, imap, poisoned, &f)
 }
 
 fn run_on_slot<T>(
@@ -150,16 +176,42 @@ fn run_on_slot<T>(
     account: &str,
     conn: &std::sync::Arc<Mutex<Box<ImapType>>>,
     mut imap: std::sync::MutexGuard<'_, Box<ImapType>>,
+    poisoned: bool,
     f: &impl Fn(&mut ImapType) -> melib::Result<T>,
 ) -> melib::Result<T> {
-    let result = f(&mut imap);
+    let result = if poisoned {
+        // An earlier panic left this connection's state unknown. Don't run anything on it,
+        // send it straight down the reconnect path below.
+        eprintln!("[imap:{account}] connection was poisoned by an earlier panic, replacing it");
+        Err(melib::Error::new(
+            "Disconnected: connection poisoned by an earlier panic",
+        ))
+    } else {
+        f(&mut imap)
+    };
     let Err(err) = result else {
         return result;
     };
     let cache_corrupted = is_cache_corrupted(&err);
     let unknown_mailbox = is_unknown_mailbox(&err);
     if !is_connection_dead(&err) && !cache_corrupted && !unknown_mailbox {
-        return Err(err);
+        // Not an error we recognise as a dead connection, but it might still be one that just
+        // failed in a way melib labels differently. melib's is_online() (the keepalive) sends a
+        // real NOOP and reconnects a dead stream itself, so use it as a health probe. Not a retry
+        // of `f`: that could repeat a side effect (move, delete) on a connection that was fine.
+        eprintln!(
+            "[imap:{account}] unrecognised error ({:?}): {}",
+            err.kind, err.summary
+        );
+        if imap_client::keepalive(&mut imap).is_ok() {
+            return Err(err);
+        }
+        eprintln!("[imap:{account}] health probe failed, reconnecting");
+    } else {
+        eprintln!(
+            "[imap:{account}] {} ({:?}), recovering",
+            err.summary, err.kind
+        );
     }
     if unknown_mailbox && !is_connection_dead(&err) {
         // Cheaper than a full reconnect below: the connection itself is fine,
@@ -179,10 +231,7 @@ fn run_on_slot<T>(
         provider_for(state, account).and_then(|provider| imap_client::connect(account, &provider));
     let Ok(fresh) = reconnect else {
         drop(imap);
-        state
-            .connections
-            .lock()
-            .unwrap()
+        lock_recovering(&state.connections)
             .entry(account.to_string())
             .or_default()
             // Evict just the one slot not the whole account connection pool
@@ -194,15 +243,40 @@ fn run_on_slot<T>(
     let retry_result = f(&mut imap);
     if retry_result.is_err() {
         drop(imap);
-        state
-            .connections
-            .lock()
-            .unwrap()
+        lock_recovering(&state.connections)
             .entry(account.to_string())
             .or_default()
             .retain(|c| !std::sync::Arc::ptr_eq(c, conn));
     }
     retry_result
+}
+
+/// Pings every pooled connection, not just the first free one. Connections after the first are
+/// only used when the first is busy, so without this they sit idle and go stale unnoticed.
+fn keepalive_all(state: &AppState, account: &str) {
+    let pool = lock_recovering(&state.connections)
+        .get(account)
+        .cloned()
+        .unwrap_or_default();
+    if pool.is_empty() {
+        // Nothing connected yet (or all evicted): this establishes one.
+        let _ = with_connection(state, account, imap_client::keepalive);
+        return;
+    }
+    for conn in &pool {
+        // Busy means it is being used right now, so it is evidently alive.
+        let Some((imap, poisoned)) = try_lock_flagging_poison(conn) else {
+            continue;
+        };
+        let _ = run_on_slot(
+            state,
+            account,
+            conn,
+            imap,
+            poisoned,
+            &imap_client::keepalive,
+        );
+    }
 }
 
 fn parse_mailbox_hash(s: &str) -> Result<melib::backends::MailboxHash, String> {
@@ -399,12 +473,18 @@ async fn fetch_mailbox_messages_batch(
                                 rows: Some(rows.into_iter().map(EnvelopeDto::from).collect()),
                                 error: None,
                             },
-                            Err(err) => MailboxBatchResult {
-                                account: req.account,
-                                mailbox_hash: req.mailbox_hash,
-                                rows: None,
-                                error: Some(err.to_string()),
-                            },
+                            Err(err) => {
+                                eprintln!(
+                                    "[fetch:{}] mailbox {} failed: {}",
+                                    req.account, req.mailbox_hash, err
+                                );
+                                MailboxBatchResult {
+                                    account: req.account,
+                                    mailbox_hash: req.mailbox_hash,
+                                    rows: None,
+                                    error: Some(err.to_string()),
+                                }
+                            }
                         }
                     })
                 })
@@ -1327,7 +1407,7 @@ fn spawn_keepalive(
             return;
         }
         let state = app.state::<AppState>();
-        let _ = with_connection(&state, &email, imap_client::keepalive);
+        keepalive_all(&state, &email);
     });
 }
 
@@ -1496,4 +1576,70 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::*;
+
+    fn poisoned_mutex() -> std::sync::Arc<Mutex<Vec<i32>>> {
+        let m = std::sync::Arc::new(Mutex::new(vec![1, 2, 3]));
+        let m2 = m.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = m2.lock().unwrap();
+            panic!("simulated panic while holding the lock");
+        })
+        .join();
+        assert!(m.is_poisoned());
+        m
+    }
+
+    #[test]
+    fn poisoned_lock_is_recovered_and_flagged_once() {
+        let m = poisoned_mutex();
+        let (guard, poisoned) = lock_flagging_poison(&m);
+        assert!(poisoned, "first lock after a panic must report the poison");
+        assert_eq!(*guard, vec![1, 2, 3]);
+        drop(guard);
+        let (_guard, poisoned_again) = lock_flagging_poison(&m);
+        assert!(
+            !poisoned_again,
+            "poison is cleared, so later locks are normal"
+        );
+    }
+
+    #[test]
+    fn plain_lock_is_not_flagged() {
+        let m = Mutex::new(0);
+        assert!(!lock_flagging_poison(&m).1);
+    }
+
+    #[test]
+    fn try_lock_reports_poison_and_busy() {
+        let m = poisoned_mutex();
+        let (guard, poisoned) = try_lock_flagging_poison(&m).expect("free poisoned lock");
+        assert!(poisoned);
+        // While held, a second attempt sees "busy", not a panic.
+        assert!(try_lock_flagging_poison(&m).is_none());
+        drop(guard);
+        assert!(!try_lock_flagging_poison(&m).expect("free again").1);
+    }
+
+    #[test]
+    fn lock_recovering_survives_a_poisoned_lock() {
+        let m = poisoned_mutex();
+        assert_eq!(lock_recovering(&m).len(), 3);
+    }
+
+    #[test]
+    fn dead_connection_classification() {
+        assert!(is_connection_dead(&melib::Error::new("Disconnected")));
+        assert!(is_connection_dead(
+            &melib::Error::new("x").set_kind(melib::error::ErrorKind::TimedOut)
+        ));
+        assert!(!is_connection_dead(
+            &melib::Error::new("IMAP transaction validation failed")
+                .set_kind(melib::error::ErrorKind::Bug)
+        ));
+    }
 }

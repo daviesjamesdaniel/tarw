@@ -9,6 +9,9 @@ const statusEl = document.getElementById("status");
 let statusRetryTimer = null;
 let statusRetryDelayMs = 3000;
 const STATUS_RETRY_MAX_MS = 60000;
+// True while the Unified Inbox refresh is failing and retrying, so the failure toast shows once.
+let unifiedRefreshFailing = false;
+let mailboxRefreshFailing = false;
 function scheduleStatusRetry(fn) {
   clearTimeout(statusRetryTimer);
   statusRetryTimer = setTimeout(() => {
@@ -2803,16 +2806,18 @@ async function loadMessages() {
       rows,
       (mailboxesByAccount[targetAccount] ?? []).find((m) => m.hash === targetMailboxHash),
     );
+    mailboxRefreshFailing = false;
     if (!isStillCurrent()) return;
     renderMessageRows(rows);
   } catch (err) {
     if (!isStillCurrent()) return;
     if (cached) {
-      showErrorToast(`Couldn't refresh this mailbox: ${err}`);
+      if (!mailboxRefreshFailing) showErrorToast(`Couldn't refresh this mailbox: ${err}`);
       updateStatus();
     } else {
       statusEl.textContent = `error: ${err}`;
     }
+    mailboxRefreshFailing = true;
     scheduleStatusRetry(loadMessages);
   }
 }
@@ -3034,12 +3039,23 @@ async function loadUnifiedMessages() {
   if (failed.length > 0) {
     if (liveRows.length === 0 && !paintedFromCache) {
       statusEl.textContent = `error: couldn't reach ${failed.join(", ")}`;
-      scheduleStatusRetry(loadUnifiedMessages);
-    } else {
+    } else if (!unifiedRefreshFailing) {
+      // Only announce the first failure of a streak: the retries below would otherwise
+      // repeat this toast on every attempt while the connection recovers.
       showErrorToast(
         failed.length === 1 ? `Couldn't refresh ${failed[0]}` : `Couldn't refresh ${failed.length} mailboxes`,
       );
     }
+    unifiedRefreshFailing = true;
+    // Retry with backoff even when the list was painted from cache - previously that case
+    // showed one toast and never tried again, so a brief failure looked permanent. Guarded so
+    // a retry that fires after leaving the Unified Inbox can't repaint over the current view.
+    scheduleStatusRetry(() => {
+      if (unifiedActive) loadUnifiedMessages();
+    });
+  } else if (unifiedRefreshFailing) {
+    unifiedRefreshFailing = false;
+    clearStatusRetry();
   }
 }
 
