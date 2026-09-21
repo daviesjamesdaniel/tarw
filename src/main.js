@@ -822,8 +822,16 @@ function onTabPointerUp(e) {
   else renderMailboxTabs();
 }
 
+// Bin and Spam: mail you are throwing away. An unread count there means nothing, and fetching
+// them in the background (and caching them) only exposes the app to the malformed headers spam
+// tends to carry. So they get no badge, aren't primed at startup, and their rows aren't persisted;
+// they load only when you open them.
+function isQuietMailbox(mailbox) {
+  return mailbox?.special_usage === "Trash" || mailbox?.special_usage === "Junk";
+}
+
 function mailboxTracksUnread(mailbox) {
-  return mailbox.special_usage !== "Sent";
+  return mailbox.special_usage !== "Sent" && !isQuietMailbox(mailbox);
 }
 
 function mailboxBadgeCount(mailbox) {
@@ -2285,7 +2293,7 @@ async function primeMailboxBadges(account, topLevel, alreadyLoadedHash) {
   const failed = [];
   await Promise.all(
     topLevel
-      .filter((m) => m.hash !== alreadyLoadedHash)
+      .filter((m) => m.hash !== alreadyLoadedHash && !isQuietMailbox(m))
       .map(async (mailbox) => {
         try {
           const rows = await invoke("fetch_mailbox_messages", { account, mailboxHash: mailbox.hash });
@@ -2335,12 +2343,19 @@ function inboxContextRows(account, excludeMailboxHash) {
 
 let persistMailboxMessagesCacheTimer = null;
 // Debounced so rapid successive calls (e.g. several IDLE pushes in a row) only serialize and write the cache once
+function isQuietCacheKey(key) {
+  const [account, hash] = key.split("::");
+  return isQuietMailbox((mailboxesByAccount[account] ?? []).find((m) => m.hash === hash));
+}
 function persistMailboxMessagesCache() {
   if (persistMailboxMessagesCacheTimer) return;
   persistMailboxMessagesCacheTimer = setTimeout(() => {
     persistMailboxMessagesCacheTimer = null;
     try {
-      localStorage.setItem("mailboxMessagesCache", JSON.stringify([...mailboxMessagesCache]));
+      localStorage.setItem(
+        "mailboxMessagesCache",
+        JSON.stringify([...mailboxMessagesCache].filter(([key]) => !isQuietCacheKey(key))),
+      );
     } catch (err) {
       console.error("Failed to persist mailboxMessagesCache", err);
     }
@@ -3124,7 +3139,7 @@ async function primeUnifiedBadges() {
     unifiedAccounts.flatMap((account) => {
       const hidden = getHiddenMailboxes(account);
       return (mailboxesByAccount[account] ?? [])
-        .filter((m) => !hidden.has(m.hash) && unifiedCategoryKey(m) !== "Inbox")
+        .filter((m) => !hidden.has(m.hash) && unifiedCategoryKey(m) !== "Inbox" && !isQuietMailbox(m))
         .map(async (mailbox) => {
           try {
             const rows = await invoke("fetch_mailbox_messages", { account, mailboxHash: mailbox.hash });

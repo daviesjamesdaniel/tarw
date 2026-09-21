@@ -98,7 +98,13 @@ fn is_connection_dead(err: &melib::Error) -> bool {
 /// delete the cache and let melib rebuild it from scratch - not something
 /// the user should ever have to do by hand over SSH.
 fn is_cache_corrupted(err: &melib::Error) -> bool {
-    err.summary.contains("malformed") || err.summary.contains("disk image")
+    err.summary.contains("malformed")
+        || err.summary.contains("disk image")
+        // A cached envelope that can't be read back: melib stores addresses as text and
+        // re-parses them strictly, so a message with a garbled address (typically spam)
+        // saves fine and then fails on every later read of that mailbox. Only one of
+        // melib's read paths resets the cache for this; the rest just return the error.
+        || err.summary.contains("Conversion error from type Blob")
 }
 
 // Each pooled connection (see POOL_SIZE below) keeps its own independent
@@ -226,6 +232,13 @@ fn run_on_slot<T>(
         // the original corruption error is more useful to the caller than
         // a cleanup-failure error would be.
         let _ = imap_client::remove_cache_files(account);
+        // The other pooled connections still have the old database open, so drop them:
+        // none of them should read or write a file that no longer exists. They are
+        // re-created on demand, against the fresh cache.
+        lock_recovering(&state.connections)
+            .entry(account.to_string())
+            .or_default()
+            .retain(|c| std::sync::Arc::ptr_eq(c, conn));
     }
     let reconnect =
         provider_for(state, account).and_then(|provider| imap_client::connect(account, &provider));
@@ -1629,6 +1642,22 @@ mod connection_tests {
     fn lock_recovering_survives_a_poisoned_lock() {
         let m = poisoned_mutex();
         assert_eq!(lock_recovering(&m).len(), 3);
+    }
+
+    #[test]
+    fn unreadable_cached_envelope_counts_as_a_corrupted_cache() {
+        let pasted = melib::Error::new(
+            "Conversion error from type Blob at index: 0, Error when parsing: \"a <<b@example.us>\" \
+             Alternative, Tag at line 1 column 213",
+        );
+        assert!(is_cache_corrupted(&pasted));
+        assert!(is_cache_corrupted(&melib::Error::new(
+            "database disk image is malformed"
+        )));
+        assert!(!is_cache_corrupted(&melib::Error::new("Disconnected")));
+        assert!(!is_cache_corrupted(&melib::Error::new(
+            "IMAP transaction validation failed"
+        )));
     }
 
     #[test]
