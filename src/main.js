@@ -54,9 +54,11 @@ const pinnedFolderCountEl = document.getElementById("pinned-folder-count");
 const readingPaneEl = document.getElementById("reading-pane");
 
 let openMessageHash = null;
+let openMessageRow = null; // the row object behind openMessageHash, so Ctrl/Shift+click can fold it into a selection without needing to look it up
 
 function showEmptyReadingPane() {
   openMessageHash = null;
+  openMessageRow = null;
   readingPaneEl.innerHTML =
     '<div class="reading-pane-empty">' +
     '<img class="reading-pane-empty-logo" src="assets/empty-state-logo.png" alt="" />' +
@@ -608,6 +610,343 @@ function resetToSignedOutState() {
   statusEl.textContent = "Use the + in the settings panel to add an account";
 }
 
+// ---- Multi-select (Ctrl/Shift+click) ----
+// No checkboxes, no separate bar: Ctrl+click toggles a row into a highlighted
+// selection, Shift+click selects a range. A plain click always just opens
+// that message and clears any existing selection, same as a file manager.
+// With a selection active, clicking one of the SELECTED row's own hover
+// icons (pin/mark-read/move/delete) applies that action to every selected
+// row, not just the one you clicked - Reply/Reply-All/Forward always stay
+// single-row, since replying to several messages at once means nothing.
+const selectedMessages = new Map(); // key -> row, see selectionKey()
+const BULK_CAPABLE_ACTIONS = new Set(["pin", "toggle-read", "delete", "move-to"]);
+let selectionAnchorRow = null;
+// Kept in sync with whatever the virtual list is currently showing, purely
+// so Shift+click has an ordered list to walk - see renderMessageRows()/
+// renderUnifiedRows(). Search results need no equivalent: searchResults
+// itself is already the full, unvirtualized render order.
+let currentDisplayRows = [];
+
+function selectionKey(row) {
+  return `${row.account}::${row.mailboxHash}::${row.hash}`;
+}
+
+function isSelected(row) {
+  return selectedMessages.has(selectionKey(row));
+}
+
+function setSelected(row, selected) {
+  if (selected) selectedMessages.set(selectionKey(row), row);
+  else selectedMessages.delete(selectionKey(row));
+}
+
+function clearSelectionState() {
+  selectedMessages.clear();
+  selectionAnchorRow = null;
+}
+
+function rowsBetween(contextRows, fromRow, toRow) {
+  const i = contextRows.findIndex((r) => selectionKey(r) === selectionKey(fromRow));
+  const j = contextRows.findIndex((r) => selectionKey(r) === selectionKey(toRow));
+  if (i === -1 || j === -1) return [toRow];
+  const [lo, hi] = i < j ? [i, j] : [j, i];
+  return contextRows.slice(lo, hi + 1);
+}
+
+// Whatever's open in the reading pane is, in every practical sense, already
+// "selected" - if you're looking at a message and start Ctrl/Shift+clicking
+// others to act on them together, you almost always want the one you're
+// currently reading included too, not left out just because you never
+// separately clicked it. Only kicks in the first time a selection starts
+// (checked via selectedMessages being otherwise empty and no anchor set yet)
+// so it doesn't keep re-adding a message you deliberately removed.
+function includeOpenMessageInSelection(clickedRow) {
+  if (!openMessageRow || selectedMessages.size > 0 || selectionAnchorRow) return;
+  // If the open message is itself what's being clicked, the normal
+  // toggle/range logic right after this call already handles it correctly -
+  // adding it here first would just have that logic immediately toggle it
+  // back off again.
+  if (selectionKey(openMessageRow) === selectionKey(clickedRow)) return;
+  setSelected(openMessageRow, true);
+}
+
+function refreshSelectionHighlight() {
+  document.querySelectorAll("[data-select-key]").forEach((el) => {
+    el.classList.toggle("row-selected", selectedMessages.has(el.dataset.selectKey));
+  });
+}
+
+// Called first from every row's click handler. Returns true if the click was
+// a selection action (Ctrl/Shift held) so the caller skips its normal
+// open-message behaviour. A plain click returns false but first clears any
+// existing selection, so opening a message elsewhere doesn't leave a stale
+// highlighted set lying around.
+function handleRowSelectClick(e, row, contextRows) {
+  if (e.ctrlKey || e.metaKey) {
+    includeOpenMessageInSelection(row);
+    setSelected(row, !isSelected(row));
+    selectionAnchorRow = row;
+    refreshSelectionHighlight();
+    return true;
+  }
+  if (e.shiftKey) {
+    includeOpenMessageInSelection(row);
+    const anchor = selectionAnchorRow ?? row;
+    for (const r of rowsBetween(contextRows, anchor, row)) setSelected(r, true);
+    selectionAnchorRow = row;
+    refreshSelectionHighlight();
+    return true;
+  }
+  if (selectedMessages.size > 0) {
+    clearSelectionState();
+    refreshSelectionHighlight();
+  }
+  return false;
+}
+
+// Runs one of the four bulk-capable actions against the whole selection.
+// `clickedRow` is whichever selected row's icon was actually clicked - its
+// own current state decides the direction for pin/mark-read, same as
+// clicking that icon normally would for just that one row.
+function runBulkRowAction(action, clickedRow, anchorRect) {
+  const rows = [...selectedMessages.values()];
+  if (action === "delete") {
+    bulkDelete(rows);
+  } else if (action === "toggle-read") {
+    bulkSetSeen(rows, !clickedRow.is_seen);
+  } else if (action === "pin") {
+    bulkSetFlagged(rows, !clickedRow.is_flagged);
+  } else if (action === "move-to") {
+    startBulkMove(rows, anchorRect);
+  }
+}
+
+// Cheap, local-only redraw for mark-read/pin: the row objects (already
+// referenced by whatever's cached - lastMailboxRows/lastUnifiedRows/
+// searchResults) are mutated in place first, so this just needs to redraw
+// from the already-correct cache. No network round trip, so it's instant -
+// the actual set_seen/set_flagged calls happen in the background after.
+function rerenderCurrentViewLocally() {
+  if (!searchResultsEl.hidden) {
+    showSearchGrid();
+  } else if (unifiedActive) {
+    if (lastUnifiedRows) renderUnifiedRows(lastUnifiedRows);
+  } else if (lastMailboxRows) {
+    renderMessageRows(lastMailboxRows);
+  }
+}
+
+function reloadCurrentViewFromServer() {
+  if (!searchResultsEl.hidden) {
+    void runSearch(searchQuery);
+  } else if (unifiedActive) {
+    void loadUnifiedMessages();
+  } else {
+    void loadMessages();
+  }
+}
+
+function reportBulkFailure(results, verb) {
+  const failed = results.filter((r) => r.status === "rejected").length;
+  if (failed > 0) {
+    showErrorToast(failed === 1 ? `Couldn't ${verb} 1 message` : `Couldn't ${verb} ${failed} messages`);
+    // Only a genuine failure pays for a real reload - the happy path never
+    // waits on the network at all.
+    reloadCurrentViewFromServer();
+  }
+}
+
+async function bulkSetSeen(rows, value) {
+  const targets = rows.filter((r) => r.is_seen !== value);
+  for (const row of targets) {
+    row.is_seen = value;
+    unreadCount += value ? -1 : 1;
+    if (row.mailboxHash === currentMailboxHash) currentMailboxOwnUnread += value ? -1 : 1;
+    adjustMailboxCounts(row.account, row.mailboxHash, 0, value ? -1 : 1);
+  }
+  clearSelectionState();
+  updateStatus();
+  if (unifiedActive) renderUnifiedTabs();
+  rerenderCurrentViewLocally();
+  const results = await Promise.allSettled(
+    targets.map((row) =>
+      invoke("set_seen", { account: row.account, hash: row.hash, mailboxHash: row.mailboxHash, value }),
+    ),
+  );
+  reportBulkFailure(results, "update");
+}
+
+async function bulkSetFlagged(rows, value) {
+  const targets = rows.filter((r) => r.is_flagged !== value);
+  for (const row of targets) row.is_flagged = value;
+  clearSelectionState();
+  rerenderCurrentViewLocally();
+  const results = await Promise.allSettled(
+    targets.map((row) =>
+      invoke("set_flagged", { account: row.account, hash: row.hash, mailboxHash: row.mailboxHash, value }),
+    ),
+  );
+  reportBulkFailure(results, value ? "pin" : "unpin");
+}
+
+// Delete and move (below) instead patch the DOM directly and drop the row
+// from whatever caches hold it, matching exactly how the single-row
+// deleteMessage()/moveMessage() already work - a re-render isn't needed
+// since the row is simply gone, not redrawn in a new state.
+async function bulkDelete(rows) {
+  clearSelectionState();
+  for (const row of rows) {
+    document.querySelectorAll(`[data-select-key="${CSS.escape(selectionKey(row))}"]`).forEach((el) => el.remove());
+    removeFromSearchResults(row);
+    totalCount -= 1;
+    if (!row.is_seen) {
+      unreadCount -= 1;
+      if (row.mailboxHash === currentMailboxHash) currentMailboxOwnUnread -= 1;
+    }
+    adjustMailboxCounts(row.account, row.mailboxHash, -1, row.is_seen ? 0 : -1);
+  }
+  updateStatus();
+  if (unifiedActive) renderUnifiedTabs();
+  else renderMailboxTabs();
+  const results = await Promise.allSettled(
+    rows.map((row) => invoke("delete_message", { account: row.account, hash: row.hash, mailboxHash: row.mailboxHash })),
+  );
+  for (const row of rows) {
+    invoke("clear_notification_for_message", { account: row.account, hash: row.hash }).catch(() => {});
+  }
+  reportBulkFailure(results, "delete");
+}
+
+// Move is the one bulk action where accounts genuinely matter: a folder
+// belongs to exactly one IMAP account, so there's no such thing as "the same
+// folder" across two Gmail accounts. A selection spanning several accounts
+// (easy to do in Unified or search results) is handled one account at a
+// time - each gets its own folder picker, in turn, so it's always
+// unambiguous which account's mail is going where. Delete/mark-read/pin
+// above have no such issue: they're simple per-row operations regardless of
+// which account a row belongs to.
+let bulkMoveQueue = [];
+
+async function bulkMoveRowsTo(rows, destinationHash) {
+  const toMove = rows.filter((r) => r.mailboxHash !== destinationHash);
+  if (toMove.length === 0) return;
+  const results = await Promise.allSettled(
+    toMove.map((row) =>
+      invoke("move_message", {
+        account: row.account,
+        hash: row.hash,
+        sourceMailboxHash: row.mailboxHash,
+        destinationMailboxHash: destinationHash,
+      }),
+    ),
+  );
+  // Same direct-DOM-patch pattern as the single-row moveMessage() - only
+  // the rows that actually succeeded are removed/recounted.
+  toMove.forEach((row, i) => {
+    if (results[i].status !== "fulfilled") return;
+    document.querySelectorAll(`[data-select-key="${CSS.escape(selectionKey(row))}"]`).forEach((el) => el.remove());
+    removeFromSearchResults(row);
+    totalCount -= 1;
+    if (!row.is_seen) {
+      unreadCount -= 1;
+      if (row.mailboxHash === currentMailboxHash) currentMailboxOwnUnread -= 1;
+    }
+    adjustMailboxCounts(row.account, row.mailboxHash, -1, row.is_seen ? 0 : -1);
+    adjustMailboxCounts(row.account, destinationHash, 1, row.is_seen ? 0 : 1);
+  });
+  updateStatus();
+  if (unifiedActive) renderUnifiedTabs();
+  else renderMailboxTabs();
+  const failed = results.filter((r) => r.status === "rejected").length;
+  if (failed > 0) {
+    showErrorToast(failed === 1 ? "Couldn't move 1 message" : `Couldn't move ${failed} messages`);
+  }
+}
+
+function startBulkMove(rows, anchorRect) {
+  const byAccount = new Map();
+  for (const row of rows) {
+    if (!byAccount.has(row.account)) byAccount.set(row.account, []);
+    byAccount.get(row.account).push(row);
+  }
+  bulkMoveQueue = [...byAccount.entries()];
+  advanceBulkMove(anchorRect);
+}
+
+function advanceBulkMove(anchorRect) {
+  if (bulkMoveQueue.length === 0) return;
+  const [account, rows] = bulkMoveQueue.shift();
+  openBulkMoveMenu(anchorRect.left, anchorRect.bottom + 4, account, rows, anchorRect);
+}
+
+function finishBulkMoveStep(anchorRect) {
+  if (bulkMoveQueue.length === 0) {
+    clearSelectionState();
+  } else {
+    advanceBulkMove(anchorRect);
+  }
+}
+
+let bulkMoveMenuEl = null;
+
+function openBulkMoveMenu(x, y, account, rows, anchorRect) {
+  closeBulkMoveMenu();
+  const list = mailboxesByAccount[account] ?? mailboxes;
+  const hidden = getHiddenMailboxes(account);
+  const menu = document.createElement("div");
+  menu.className = "move-menu";
+  const header = document.createElement("div");
+  header.className = "move-menu-header";
+  header.textContent = `Move ${rows.length} message${rows.length === 1 ? "" : "s"} from ${account} to:`;
+  menu.appendChild(header);
+  const newFolderBtn = document.createElement("button");
+  newFolderBtn.type = "button";
+  newFolderBtn.className = "move-menu-name move-menu-new-folder";
+  newFolderBtn.textContent = "New folder…";
+  menu.appendChild(newFolderBtn);
+  // No source folder is disabled here (unlike the single-row picker) -
+  // rows in one account can legitimately come from several different
+  // mailboxes at once, so there's no single "current folder" to grey out.
+  for (const mailbox of orderedMailboxes(list).filter((m) => isMoveTreeRoot(m, list))) {
+    if (hidden.has(mailbox.hash)) continue;
+    menu.appendChild(buildMoveMenuNode(mailbox, null, 0, hidden, list));
+  }
+  menu.addEventListener("click", async (e) => {
+    if (e.target === newFolderBtn) {
+      closeBulkMoveMenu();
+      createMailboxOnCreated = (created) => {
+        if (created) bulkMoveRowsTo(rows, created.hash).then(() => finishBulkMoveStep(anchorRect));
+        else finishBulkMoveStep(anchorRect);
+      };
+      openCreateMailbox(null, account, true);
+      return;
+    }
+    const button = e.target.closest(".move-menu-name");
+    if (!button || button.disabled) return;
+    closeBulkMoveMenu();
+    await bulkMoveRowsTo(rows, button.dataset.hash);
+    finishBulkMoveStep(anchorRect);
+  });
+  document.body.appendChild(menu);
+  bulkMoveMenuEl = menu;
+  const rect = menu.getBoundingClientRect();
+  const maxX = window.innerWidth - rect.width - 8;
+  const maxY = window.innerHeight - rect.height - 8;
+  menu.style.left = `${Math.max(0, Math.min(x, maxX))}px`;
+  menu.style.top = `${Math.max(0, Math.min(y, maxY))}px`;
+  setTimeout(() => document.addEventListener("click", closeBulkMoveMenuOnOutsideClick), 0);
+}
+
+function closeBulkMoveMenu() {
+  bulkMoveMenuEl?.remove();
+  bulkMoveMenuEl = null;
+  document.removeEventListener("click", closeBulkMoveMenuOnOutsideClick);
+}
+
+function closeBulkMoveMenuOnOutsideClick(e) {
+  if (bulkMoveMenuEl && !bulkMoveMenuEl.contains(e.target)) closeBulkMoveMenu();
+}
+
 function buildRow(row, canMove) {
   const li = document.createElement("li");
   li.className = "inbox-row";
@@ -622,6 +961,8 @@ function buildRow(row, canMove) {
   // only ever set .selected as a one-off DOM mutation on the specific <li>
   // clicked, with nothing to reapply it once that element was discarded.
   if (row.hash === openMessageHash) li.classList.add("selected");
+  li.dataset.selectKey = selectionKey(row);
+  if (isSelected(row)) li.classList.add("row-selected");
   let chipHtml = "";
   if (unifiedActive && showAccountPills) {
     const color = accountColor(row.account);
@@ -640,7 +981,7 @@ function buildRow(row, canMove) {
       <button class="row-action" data-action="reply" title="Reply">${ICONS.reply}</button>
       <button class="row-action" data-action="reply-all" title="Reply All">${ICONS.replyAll}</button>
       <button class="row-action" data-action="forward" title="Forward">${ICONS.forward}</button>
-      ${canMove ? `<button class="row-action" data-action="move-to" title="Move to&hellip;">${ICONS.moveTo}</button>` : ""}
+      <button class="row-action" data-action="move-to" title="Move to&hellip;">${ICONS.moveTo}</button>
       <button class="row-action" data-action="delete" title="Delete">${ICONS.delete}</button>
     </div>
     ${threadToggleHtml}
@@ -657,7 +998,8 @@ function buildRow(row, canMove) {
   // doesn't re-collapse on a second click, since that's the chevron's own
   // dedicated job below, not something a click that's also opening a
   // message should surprise you with.
-  li.addEventListener("click", () => {
+  li.addEventListener("click", (e) => {
+    if (handleRowSelectClick(e, row, currentDisplayRows)) return;
     openMessage(row, li);
     if (row.__threadCount > 1 && !row.__threadExpanded) {
       toggleThreadExpanded(row.__threadKey);
@@ -676,6 +1018,10 @@ function buildRow(row, canMove) {
     e.stopPropagation();
     const button = e.target.closest(".row-action");
     if (!button) return;
+    if (isSelected(row) && selectedMessages.size > 1 && BULK_CAPABLE_ACTIONS.has(button.dataset.action)) {
+      runBulkRowAction(button.dataset.action, row, button.getBoundingClientRect());
+      return;
+    }
     if (button.dataset.action === "pin") {
       togglePin(row, button, li);
     } else if (button.dataset.action === "toggle-read") {
@@ -977,6 +1323,7 @@ mailboxContextMenuEl.addEventListener("click", (e) => {
 let createMailboxParent = null;
 let createMailboxAccount = null;
 let createMailboxUnified = false;
+let createMailboxOnCreated = null; // optional (createdMailbox|null) => void, used by bulk move's "New folder..."
 
 function openCreateMailbox(parentMailbox, account = activeAccount, unified = false) {
   createMailboxParent = parentMailbox;
@@ -1015,6 +1362,14 @@ createMailboxFormEl.addEventListener("submit", async (e) => {
   try {
     const updated = await invoke("create_mailbox", { account, path });
     closeCreateMailbox();
+    if (createMailboxOnCreated) {
+      const cb = createMailboxOnCreated;
+      createMailboxOnCreated = null;
+      mailboxesByAccount[account] = updated;
+      if (account === activeAccount && !unifiedActive) mailboxes = updated;
+      cb(updated.find((m) => m.path === path) ?? null);
+      return;
+    }
     if (unified) {
       mailboxesByAccount[account] = updated;
       if (unifiedManagePanelEl) renderUnifiedManagePanelBody(unifiedManagePanelEl);
@@ -2779,6 +3134,7 @@ function renderMessageRows(rows) {
         showPinnedFolder,
       )
     : regularRows;
+  currentDisplayRows = displayRows;
   setVirtualRows(displayRows, (row) => buildRow(row, canMove));
   updatePinnedFolderCount();
   prefetchTopBodies(visibleRows);
@@ -2975,6 +3331,7 @@ function renderUnifiedRows(rows) {
   const displayRows = threadViewEnabled
     ? flattenThreads(buildThreads(visibleRows), showPinnedFolder)
     : regularRows;
+  currentDisplayRows = displayRows;
   setVirtualRows(displayRows, (row) => buildRow(row, canMoveFor(row)));
   updatePinnedFolderCount();
   prefetchTopBodies(visibleRows);
@@ -3631,6 +3988,8 @@ function buildSearchGridRow(row, canMove) {
   const tr = document.createElement("tr");
   tr.className = "search-grid-row";
   if (!row.is_seen) tr.classList.add("unread");
+  tr.dataset.selectKey = selectionKey(row);
+  if (isSelected(row)) tr.classList.add("row-selected");
   const color = accountColor(row.account);
   tr.innerHTML = `<td class="search-grid-status-col">
       <span class="unread-dot" title="Unread"></span>
@@ -3646,18 +4005,25 @@ function buildSearchGridRow(row, canMove) {
       <button class="row-action" data-action="reply" title="Reply">${ICONS.reply}</button>
       <button class="row-action" data-action="reply-all" title="Reply All">${ICONS.replyAll}</button>
       <button class="row-action" data-action="forward" title="Forward">${ICONS.forward}</button>
-      ${canMove ? `<button class="row-action" data-action="move-to" title="Move to&hellip;">${ICONS.moveTo}</button>` : ""}
+      <button class="row-action" data-action="move-to" title="Move to&hellip;">${ICONS.moveTo}</button>
       <button class="row-action" data-action="toggle-read" title="${row.is_seen ? "Mark unread" : "Mark read"}">${row.is_seen ? ICONS.mailOpen : ICONS.mailClosed}</button>
       <button class="row-action" data-action="pin" title="${row.is_flagged ? "Unpin" : "Pin"}">${row.is_flagged ? ICONS.pinFilled : ICONS.pinOutline}</button>
       <button class="row-action" data-action="delete" title="Delete">${ICONS.delete}</button>
     </td>`;
-  tr.addEventListener("click", () => openSearchResultInContext(row));
+  tr.addEventListener("click", (e) => {
+    if (handleRowSelectClick(e, row, searchResults)) return;
+    openSearchResultInContext(row);
+  });
 
   const actionsEl = tr.querySelector(".search-grid-actions");
   actionsEl.addEventListener("click", (e) => {
     e.stopPropagation();
     const button = e.target.closest(".row-action");
     if (!button) return;
+    if (isSelected(row) && selectedMessages.size > 1 && BULK_CAPABLE_ACTIONS.has(button.dataset.action)) {
+      runBulkRowAction(button.dataset.action, row, button.getBoundingClientRect());
+      return;
+    }
     if (button.dataset.action === "delete") {
       deleteMessage(row, tr);
     } else if (button.dataset.action === "move-to") {
@@ -3886,11 +4252,26 @@ function openMoveMenu(x, y, row, li) {
   header.className = "move-menu-header";
   header.textContent = "Select a folder to move to";
   menu.appendChild(header);
+  const newFolderBtn = document.createElement("button");
+  newFolderBtn.type = "button";
+  newFolderBtn.className = "move-menu-name move-menu-new-folder";
+  newFolderBtn.textContent = "New folder…";
+  menu.appendChild(newFolderBtn);
   for (const mailbox of orderedMailboxes(list).filter((m) => isMoveTreeRoot(m, list))) {
     if (hidden.has(mailbox.hash)) continue;
     menu.appendChild(buildMoveMenuNode(mailbox, row.mailboxHash, 0, hidden, list));
   }
   menu.addEventListener("click", (e) => {
+    if (e.target === newFolderBtn) {
+      const targetRow = moveMenuRow;
+      const targetLi = moveMenuLi;
+      closeMoveMenu();
+      createMailboxOnCreated = (created) => {
+        if (created) moveMessage(targetRow, targetLi, targetRow.mailboxHash, created.hash);
+      };
+      openCreateMailbox(null, targetRow.account, true);
+      return;
+    }
     const button = e.target.closest(".move-menu-name");
     if (!button || button.disabled) return;
     const targetRow = moveMenuRow;
@@ -4023,6 +4404,7 @@ async function openMessage(row, li) {
 
   const hash = row.hash;
   openMessageHash = hash;
+  openMessageRow = row;
   readingPaneEl.innerHTML = "<p class=\"placeholder\">Loading…</p>";
   try {
     const { body, is_html, attachments, from, to, cc, date, subject } = await fetchBodyCached(row.account, hash, row.mailboxHash);
@@ -4043,6 +4425,7 @@ async function openMessage(row, li) {
     }
   } catch (err) {
     openMessageHash = null;
+    openMessageRow = null;
     readingPaneEl.textContent = `error: ${err}`;
   }
 }

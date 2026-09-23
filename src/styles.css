@@ -2027,3 +2027,13 @@ body {
   font-size: 0.8rem;
   max-width: 8rem;
 }
+
+/* Multi-select (Ctrl/Shift+click, see main.js): no checkboxes, just a
+   highlight on the selected rows. */
+.inbox-row.row-selected {
+  background: rgba(124, 92, 255, 0.14);
+}
+
+.search-grid-row.row-selected {
+  background: rgba(124, 92, 255, 0.14);
+}
