@@ -1,4 +1,4 @@
-import { SIGNATURE_MARKER, attachFontSync, fillFontSelect, escapeHtml, htmlToPlainText, attachLinkBar, insertLinkInEditor, insertImageInEditor, prepareImage, captureEditorRange } from "./richtext.js";
+import { SIGNATURE_MARKER, attachFontSync, fillFontSelect, escapeHtml, htmlToPlainText, attachLinkBar, insertLinkInEditor, insertImageInEditor, prepareImage, captureEditorRange, FONT_SIZE_PX, setSystemFonts } from "./richtext.js";
 
 const { invoke } = window.__TAURI__.core;
 const { emit } = window.__TAURI__.event;
@@ -168,6 +168,10 @@ function initComposeBodyDoc() {
       "</style></head><body contenteditable=\"true\"></body></html>",
   );
   doc.close();
+  const defaultFont = localStorage.getItem("composeDefaultFont");
+  const defaultSize = localStorage.getItem("composeDefaultFontSize");
+  if (defaultFont) doc.body.style.fontFamily = defaultFont;
+  if (defaultSize && FONT_SIZE_PX[defaultSize]) doc.body.style.fontSize = `${FONT_SIZE_PX[defaultSize]}px`;
 }
 initComposeBodyDoc();
 attachLinkBar(composeBodyEl, (url) => invoke("open_external_url", { url }));
@@ -215,8 +219,15 @@ function applyFontCommand(command, value) {
   doc.execCommand("styleWithCSS", false, false);
 }
 
-fillFontSelect(document.getElementById("compose-font-family"));
-attachFontSync(composeBodyEl, document.getElementById("compose-font-family"), document.getElementById("compose-font-size"));
+(async () => {
+  try {
+    setSystemFonts(await invoke("list_system_fonts"));
+  } catch (err) {
+    console.error("list_system_fonts failed", err);
+  }
+  fillFontSelect(document.getElementById("compose-font-family"));
+  attachFontSync(composeBodyEl, document.getElementById("compose-font-family"), document.getElementById("compose-font-size"));
+})();
 document.getElementById("compose-font-family").addEventListener("change", (e) => {
   applyFontCommand("fontName", e.target.value);
 });

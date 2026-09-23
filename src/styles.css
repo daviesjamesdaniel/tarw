@@ -189,6 +189,24 @@ body {
   font-weight: 500;
 }
 
+.settings-compose-defaults-row {
+  cursor: default;
+}
+
+.settings-compose-defaults-row:hover {
+  background: none;
+}
+
+.settings-compose-defaults-controls {
+  display: flex;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+.settings-compose-defaults-controls select {
+  max-width: 7.5rem;
+}
+
 .toggle-switch {
   position: relative;
   flex: 0 0 auto;

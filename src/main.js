@@ -1,4 +1,4 @@
-import { attachFontSync, fillFontSelect, attachImageBar, attachLinkBar, insertImageInEditor, insertLinkInEditor, prepareImage, sanitizeHtml, captureEditorRange } from "./richtext.js";
+import { attachFontSync, fillFontSelect, attachImageBar, attachLinkBar, insertImageInEditor, insertLinkInEditor, prepareImage, sanitizeHtml, captureEditorRange, setSystemFonts } from "./richtext.js";
 
 const { invoke } = window.__TAURI__.core;
 
@@ -2018,6 +2018,50 @@ function buildToggleRow(label, checked, onToggle, extraClass) {
   return row;
 }
 
+const COMPOSE_FONT_SIZE_OPTIONS = [
+  ["", "Default"],
+  ["1", "Tiny"],
+  ["2", "Small"],
+  ["3", "Normal"],
+  ["4", "Large"],
+  ["5", "Larger"],
+];
+
+function buildComposeDefaultsRow() {
+  const row = document.createElement("div");
+  row.className = "settings-panel-account-row settings-panel-unified-row settings-compose-defaults-row";
+
+  const label = document.createElement("span");
+  label.className = "settings-panel-account-email";
+  label.textContent = "Default compose font";
+  row.appendChild(label);
+
+  const controls = document.createElement("div");
+  controls.className = "settings-compose-defaults-controls";
+
+  const familySelect = document.createElement("select");
+  familySelect.className = "compose-font-select";
+  fillFontSelect(familySelect);
+  familySelect.value = localStorage.getItem("composeDefaultFont") || "";
+  familySelect.addEventListener("change", () => {
+    if (familySelect.value) localStorage.setItem("composeDefaultFont", familySelect.value);
+    else localStorage.removeItem("composeDefaultFont");
+  });
+
+  const sizeSelect = document.createElement("select");
+  sizeSelect.className = "compose-font-select";
+  for (const [value, text] of COMPOSE_FONT_SIZE_OPTIONS) sizeSelect.appendChild(new Option(text, value));
+  sizeSelect.value = localStorage.getItem("composeDefaultFontSize") || "";
+  sizeSelect.addEventListener("change", () => {
+    if (sizeSelect.value) localStorage.setItem("composeDefaultFontSize", sizeSelect.value);
+    else localStorage.removeItem("composeDefaultFontSize");
+  });
+
+  controls.append(familySelect, sizeSelect);
+  row.appendChild(controls);
+  return row;
+}
+
 function renderSettingsAccountRows(container, accountList) {
   if (accountList.length === 0) {
     container.innerHTML = `<div class="settings-panel-account-row">
@@ -2034,6 +2078,8 @@ function renderSettingsAccountRows(container, accountList) {
   container.appendChild(
     buildToggleRow("Threaded", threadViewEnabled, toggleThreadView, "settings-panel-unified-row"),
   );
+
+  container.appendChild(buildComposeDefaultsRow());
 
   if (unifiedActive) {
     container.appendChild(
@@ -2222,8 +2268,15 @@ document.getElementById("signature-text-color").addEventListener("input", (e) =>
   signatureBodyEl.contentDocument.execCommand("foreColor", false, e.target.value);
 });
 
-fillFontSelect(document.getElementById("signature-font-family"));
-attachFontSync(signatureBodyEl, document.getElementById("signature-font-family"), document.getElementById("signature-font-size"));
+(async () => {
+  try {
+    setSystemFonts(await invoke("list_system_fonts"));
+  } catch (err) {
+    console.error("list_system_fonts failed", err);
+  }
+  fillFontSelect(document.getElementById("signature-font-family"));
+  attachFontSync(signatureBodyEl, document.getElementById("signature-font-family"), document.getElementById("signature-font-size"));
+})();
 document.getElementById("signature-font-family").addEventListener("change", (e) => {
   if (!e.target.value) return;
   signatureBodyEl.contentWindow.focus();

@@ -57,7 +57,7 @@ const ALLOWED_STYLE_PROPS = [
   "font-style",
   "text-decoration",
 ];
-const FONT_SIZE_PX = { 1: 10, 2: 13, 3: 16, 4: 18, 5: 24, 6: 32, 7: 48 };
+export const FONT_SIZE_PX = { 1: 10, 2: 13, 3: 16, 4: 18, 5: 24, 6: 32, 7: 48 };
 
 // Style values are copied verbatim into the stored signature, so refuse
 // anything that could pull in a resource or break out of the attribute.
@@ -133,16 +133,23 @@ export function sanitizeHtml(html) {
 // In-app replacement for window.prompt(), which is unreliable in WebKitGTK.
 // Resolves with the entered URL, or null if cancelled.
 export function askForLink(initial = "") {
+  return askForText({ title: "Insert link", placeholder: "https://example.com", submitLabel: "Insert", initial });
+}
+
+// WebKitGTK's window.prompt()/confirm() don't reliably work in this app, so
+// this is the one real text-input dialog, reused for both links and custom
+// fonts rather than duplicating the overlay markup/wiring per caller.
+export function askForText({ title, placeholder = "", submitLabel = "OK", initial = "" }) {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "compose-overlay";
     overlay.innerHTML = `<form class="compose-panel create-mailbox-panel">
-      <div class="compose-header"><span>Insert link</span>
+      <div class="compose-header"><span>${escapeHtml(title)}</span>
         <button type="button" class="compose-close" aria-label="Close">&times;</button></div>
-      <div class="link-dialog-body"><input type="text" class="link-dialog-input" placeholder="https://example.com" spellcheck="false" /></div>
+      <div class="link-dialog-body"><input type="text" class="link-dialog-input" placeholder="${escapeHtml(placeholder)}" spellcheck="false" /></div>
       <div class="compose-footer">
         <button type="button" class="compose-secondary link-dialog-cancel">Cancel</button>
-        <button type="submit" class="compose-send">Insert</button>
+        <button type="submit" class="compose-send">${escapeHtml(submitLabel)}</button>
       </div></form>`;
     document.body.appendChild(overlay);
     const input = overlay.querySelector("input");
@@ -434,13 +441,41 @@ const FONT_GROUPS = [
   ["Other", [["Comic Sans MS", "'Comic Sans MS', cursive, sans-serif"]]],
 ];
 
+// Fonts actually installed on this machine (via fontconfig - see
+// list_system_fonts in Rust). Each window populates this once at startup by
+// calling setSystemFonts(await invoke("list_system_fonts")); module state
+// doesn't cross windows, so main.js and compose.js each do this themselves.
+let systemFonts = [];
+
+export function setSystemFonts(names) {
+  systemFonts = [...names].sort((a, b) => a.localeCompare(b));
+}
+
 export function fillFontSelect(select) {
+  // The editor body doesn't start in any of the named fonts below (it uses
+  // the system UI font), so without this the dropdown opens with nothing
+  // selected at all until the user actually picks a font.
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "Default";
+  select.appendChild(defaultOption);
   for (const [label, fonts] of FONT_GROUPS) {
     const group = document.createElement("optgroup");
     group.label = label;
     for (const [name, stack] of fonts) {
       const option = document.createElement("option");
       option.value = stack;
+      option.textContent = name;
+      group.appendChild(option);
+    }
+    select.appendChild(group);
+  }
+  if (systemFonts.length > 0) {
+    const group = document.createElement("optgroup");
+    group.label = "Monospace (installed)";
+    for (const name of systemFonts) {
+      const option = document.createElement("option");
+      option.value = /[,'"]/.test(name) ? name : `'${name}', sans-serif`;
       option.textContent = name;
       group.appendChild(option);
     }

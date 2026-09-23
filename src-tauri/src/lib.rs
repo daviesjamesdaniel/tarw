@@ -895,6 +895,33 @@ async fn read_attachment_file(path: String) -> Result<AttachmentFileInfo, String
     .map_err(|e| e.to_string())?
 }
 
+// Lists monospace font family names actually installed on this machine (via
+// fontconfig), so the compose/signature font pickers offer fonts that are
+// guaranteed to exist locally instead of the user having to guess a name.
+// Limited to monospace since that covers the realistic use case (code
+// snippets in mail) without dumping every UI/decorative font on the system.
+#[tauri::command]
+async fn list_system_fonts() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let output = std::process::Command::new("fc-list")
+            .args([":spacing=mono", "family"])
+            .output()
+            .map_err(|e| e.to_string())?;
+        let mut families: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            for name in line.split(',') {
+                let name = name.trim();
+                if !name.is_empty() {
+                    families.insert(name.to_string());
+                }
+            }
+        }
+        Ok(families.into_iter().collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn send_message(
     app: tauri::AppHandle,
@@ -1482,7 +1509,8 @@ pub fn run() {
             clear_notification_for_message,
             read_attachment_file,
             update_account_signatures,
-            open_external_url
+            open_external_url,
+            list_system_fonts
         ])
         .setup(|app| {
             // Populate state.providers (and start watchers/keepalive) before the window/webview
