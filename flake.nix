@@ -70,7 +70,7 @@
         # 2026-09-14.
         sourceRoot = "source/src-tauri";
         pname = "tarw";
-        version = "0.4.1";
+        version = "0.4.2";
       };
 
       # Real caching restored, 2026-09-14 (see project memory): confirmed via
