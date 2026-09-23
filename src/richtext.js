@@ -255,18 +255,27 @@ export function attachLinkBar(iframe, openUrl) {
   });
 }
 
-// Signature images are stored inline as data: URIs (rewritten to CID parts on
-// send), so keep them modest: anything wider than MAX_IMAGE_WIDTH is scaled
-// down, and the result has to fit under MAX_IMAGE_BYTES.
+// Images are stored inline as data: URIs (rewritten to CID parts on send), so
+// keep them modest: anything wider than MAX_IMAGE_WIDTH is scaled down, and
+// the result has to fit under MAX_IMAGE_BYTES.
 const MAX_IMAGE_WIDTH = 600;
 const MAX_IMAGE_BYTES = 300 * 1024;
 const MIN_IMAGE_WIDTH = 120;
+// Source files above this are rejected before decode/canvas work: a huge
+// source (e.g. a full-res camera photo) can otherwise hang the WebKitGTK
+// main thread for a long time with no feedback, which looks like a silent
+// failure rather than an error.
+const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
 
 const approxBytes = (dataUri) => Math.floor(((dataUri.length - dataUri.indexOf(",") - 1) * 3) / 4);
 
 // Returns { dataUri, width } for an image given as base64. Small images pass
 // through untouched (keeping e.g. GIF animation); others are re-drawn scaled.
 export async function prepareImage(bytesBase64, mimeType) {
+  const sourceBytes = Math.floor((bytesBase64.length * 3) / 4);
+  if (sourceBytes > MAX_SOURCE_BYTES) {
+    throw new Error(`That image is too large (over ${Math.round(MAX_SOURCE_BYTES / (1024 * 1024))}MB) - try a smaller file`);
+  }
   const original = `data:${mimeType};base64,${bytesBase64}`;
   const img = new Image();
   img.src = original;
@@ -288,15 +297,40 @@ export async function prepareImage(bytesBase64, mimeType) {
     const dataUri = canvas.toDataURL(outType, 0.85);
     if (approxBytes(dataUri) <= MAX_IMAGE_BYTES) return { dataUri, width };
     if (width <= MIN_IMAGE_WIDTH) {
-      throw new Error("That image is too large to use in a signature, even scaled down");
+      throw new Error("That image is too large to use here, even scaled down");
     }
     width = Math.round(width * 0.8);
   }
 }
 
-export function insertImageInEditor(iframe, { dataUri, width }) {
+// Picking a file (native dialog) and scaling it down can take a while, long
+// enough that WebKitGTK loses the editor's caret position in the meantime -
+// capture it before that gap and pass it to insertImageInEditor so the image
+// still lands where the user clicked instead of silently going nowhere.
+export function captureEditorRange(iframe) {
+  const sel = iframe.contentWindow?.getSelection();
+  return sel && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null;
+}
+
+export function insertImageInEditor(iframe, { dataUri, width }, savedRange) {
   const win = iframe.contentWindow;
+  const doc = iframe.contentDocument;
   win.focus();
+  const sel = win.getSelection();
+  if (savedRange) {
+    sel.removeAllRanges();
+    sel.addRange(savedRange);
+  } else if (!sel || sel.rangeCount === 0) {
+    // Nothing was ever selected/clicked in the body (e.g. a fresh compose
+    // window) - focus() alone doesn't reliably create a caret in WebKitGTK,
+    // and execCommand with no selection silently does nothing. Fall back to
+    // a collapsed range at the end of the body.
+    const range = doc.createRange();
+    range.selectNodeContents(doc.body);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
   const shown = Math.min(width, 200);
   iframe.contentDocument.execCommand(
     "insertHTML",

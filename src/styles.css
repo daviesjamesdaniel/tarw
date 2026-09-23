@@ -1640,6 +1640,11 @@ body {
   background: rgba(124, 92, 255, 0.12);
 }
 
+.compose-tool:disabled {
+  opacity: 0.4;
+  cursor: progress;
+}
+
 .compose-tool-sep {
   width: 1px;
   height: 1.2rem;

@@ -1,4 +1,4 @@
-import { attachFontSync, fillFontSelect, attachImageBar, attachLinkBar, insertImageInEditor, insertLinkInEditor, prepareImage, sanitizeHtml } from "./richtext.js";
+import { attachFontSync, fillFontSelect, attachImageBar, attachLinkBar, insertImageInEditor, insertLinkInEditor, prepareImage, sanitizeHtml, captureEditorRange } from "./richtext.js";
 
 const { invoke } = window.__TAURI__.core;
 
@@ -2084,18 +2084,25 @@ let signatureCurrentId = null;
 attachLinkBar(signatureBodyEl, (url) => invoke("open_external_url", { url }));
 attachImageBar(signatureBodyEl);
 
-document.getElementById("signature-image-button").addEventListener("click", async () => {
+const signatureImageButtonEl = document.getElementById("signature-image-button");
+signatureImageButtonEl.addEventListener("click", async () => {
+  const savedRange = captureEditorRange(signatureBodyEl);
   try {
     const path = await window.__TAURI__.dialog.open({
       filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
     });
     if (!path) return;
+    signatureImageButtonEl.disabled = true;
+    signatureImageButtonEl.title = "Adding image…";
     const file = await invoke("read_attachment_file", { path });
     if (!file.mime_type.startsWith("image/")) throw new Error("That file isn't an image");
-    insertImageInEditor(signatureBodyEl, await prepareImage(file.bytes_base64, file.mime_type));
+    insertImageInEditor(signatureBodyEl, await prepareImage(file.bytes_base64, file.mime_type), savedRange);
   } catch (err) {
     console.error("insert signature image failed", err);
     showErrorToast(`Couldn't add image: ${err?.message ?? err}`);
+  } finally {
+    signatureImageButtonEl.disabled = false;
+    signatureImageButtonEl.title = "Insert image";
   }
 });
 

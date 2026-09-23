@@ -1,4 +1,4 @@
-import { SIGNATURE_MARKER, attachFontSync, fillFontSelect, escapeHtml, htmlToPlainText, attachLinkBar, insertLinkInEditor } from "./richtext.js";
+import { SIGNATURE_MARKER, attachFontSync, fillFontSelect, escapeHtml, htmlToPlainText, attachLinkBar, insertLinkInEditor, insertImageInEditor, prepareImage, captureEditorRange } from "./richtext.js";
 
 const { invoke } = window.__TAURI__.core;
 const { emit } = window.__TAURI__.event;
@@ -21,6 +21,7 @@ const composeSignatureToggleEl = document.getElementById("compose-signature-togg
 const composeSignatureLabelEl = document.getElementById("compose-signature-label");
 const composeSignatureSelectEl = document.getElementById("compose-signature-select");
 const composeLinkButtonEl = document.getElementById("compose-link-button");
+const composeImageButtonEl = document.getElementById("compose-image-button");
 const composeTextColorEl = document.getElementById("compose-text-color");
 const composeHighlightColorEl = document.getElementById("compose-highlight-color");
 const composeAttachmentsBarEl = document.getElementById("compose-attachments-bar");
@@ -170,6 +171,27 @@ function initComposeBodyDoc() {
 }
 initComposeBodyDoc();
 attachLinkBar(composeBodyEl, (url) => invoke("open_external_url", { url }));
+
+composeImageButtonEl.addEventListener("click", async () => {
+  const savedRange = captureEditorRange(composeBodyEl);
+  try {
+    const path = await window.__TAURI__.dialog.open({
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+    });
+    if (!path) return;
+    composeImageButtonEl.disabled = true;
+    composeImageButtonEl.title = "Adding image…";
+    const file = await invoke("read_attachment_file", { path });
+    if (!file.mime_type.startsWith("image/")) throw new Error("That file isn't an image");
+    insertImageInEditor(composeBodyEl, await prepareImage(file.bytes_base64, file.mime_type), savedRange);
+  } catch (err) {
+    console.error("insert compose image failed", err);
+    composeErrorEl.textContent = `Couldn't add image: ${err?.message ?? err}`;
+  } finally {
+    composeImageButtonEl.disabled = false;
+    composeImageButtonEl.title = "Insert image";
+  }
+});
 
 composeToolbarEl.addEventListener("click", (e) => {
   const button = e.target.closest("button[data-cmd]");
