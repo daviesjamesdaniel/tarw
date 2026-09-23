@@ -2,10 +2,9 @@
 
 Feature roadmap, in priority order:
 
-1. Image button in the normal compose body — signatures already support embedded images, but the main compose editor body has no way to insert an image.
-2. Signature image from URL — signature images currently must be embedded/uploaded directly; add support for pointing a signature image at a URL instead.
+(nothing queued right now)
 
-Done: conversation/thread view, signatures in the composer (HTML, multiple per account, with images and links), multi-select messages (Ctrl/Shift+click, no checkboxes/bar - a selected row's own action icons apply to the whole selection; Move handles cross-account selections one account at a time with a New folder... option).
+Done: conversation/thread view, signatures in the composer (HTML, multiple per account, with images and links), multi-select messages (Ctrl/Shift+click, no checkboxes/bar - a selected row's own action icons apply to the whole selection; Move handles cross-account selections one account at a time with a New folder... option), image button in the compose body (matches signatures), image-from-URL in both compose and signature editors, a settable default compose font (family + size), an installed-monospace-fonts group in the font pickers (via fontconfig), and a fix for the font/size dropdowns opening with a blank selection.
 
 Deliberately not building: automatic filters/rules (auto-move by sender,
 etc.). Both accounts are Gmail, which already has real server-side filters

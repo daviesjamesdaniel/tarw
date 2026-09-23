@@ -319,7 +319,12 @@ export function captureEditorRange(iframe) {
   return sel && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null;
 }
 
-export function insertImageInEditor(iframe, { dataUri, width }, savedRange) {
+// Restores savedRange (see captureEditorRange), or - if there was never a
+// selection to begin with (e.g. a fresh compose window) - falls back to a
+// collapsed range at the end of the body. focus() alone doesn't reliably
+// create a caret in WebKitGTK, and execCommand with no selection silently
+// does nothing, so callers that insertHTML need one of these first.
+function placeCaret(iframe, savedRange) {
   const win = iframe.contentWindow;
   const doc = iframe.contentDocument;
   win.focus();
@@ -328,21 +333,39 @@ export function insertImageInEditor(iframe, { dataUri, width }, savedRange) {
     sel.removeAllRanges();
     sel.addRange(savedRange);
   } else if (!sel || sel.rangeCount === 0) {
-    // Nothing was ever selected/clicked in the body (e.g. a fresh compose
-    // window) - focus() alone doesn't reliably create a caret in WebKitGTK,
-    // and execCommand with no selection silently does nothing. Fall back to
-    // a collapsed range at the end of the body.
     const range = doc.createRange();
     range.selectNodeContents(doc.body);
     range.collapse(false);
     sel.removeAllRanges();
     sel.addRange(range);
   }
+}
+
+export function insertImageInEditor(iframe, { dataUri, width }, savedRange) {
+  placeCaret(iframe, savedRange);
   const shown = Math.min(width, 200);
   iframe.contentDocument.execCommand(
     "insertHTML",
     false,
     `<img src="${dataUri}" alt="" width="${shown}" border="0">`,
+  );
+}
+
+// Inserts an <img> pointing at a remote URL rather than an embedded data:
+// URI - the image stays hosted wherever it is instead of being downloaded
+// and re-encoded, so there's no size cap to enforce here. Width is left
+// unset (capped by the editor's img{max-width:100%}); the existing resize
+// bar (attachImageBar) works on it the same as an uploaded image once it
+// loads and gets a naturalWidth.
+export function insertImageUrlFromPrompt(iframe, savedRange) {
+  return askForText({ title: "Insert image from URL", placeholder: "https://example.com/image.png", submitLabel: "Insert" }).then(
+    (raw) => {
+      if (!raw) return false;
+      const url = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+      placeCaret(iframe, savedRange);
+      iframe.contentDocument.execCommand("insertHTML", false, `<img src="${escapeHtml(url)}" alt="" border="0">`);
+      return true;
+    },
   );
 }
 

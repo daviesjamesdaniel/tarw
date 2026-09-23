@@ -1,4 +1,4 @@
-import { SIGNATURE_MARKER, attachFontSync, fillFontSelect, escapeHtml, htmlToPlainText, attachLinkBar, insertLinkInEditor, insertImageInEditor, prepareImage, captureEditorRange, FONT_SIZE_PX, setSystemFonts } from "./richtext.js";
+import { SIGNATURE_MARKER, attachFontSync, fillFontSelect, escapeHtml, htmlToPlainText, attachLinkBar, insertLinkInEditor, insertImageInEditor, insertImageUrlFromPrompt, prepareImage, captureEditorRange, FONT_SIZE_PX, setSystemFonts } from "./richtext.js";
 
 const { invoke } = window.__TAURI__.core;
 const { emit } = window.__TAURI__.event;
@@ -194,6 +194,16 @@ composeImageButtonEl.addEventListener("click", async () => {
   } finally {
     composeImageButtonEl.disabled = false;
     composeImageButtonEl.title = "Insert image";
+  }
+});
+
+document.getElementById("compose-image-url-button").addEventListener("click", async () => {
+  const savedRange = captureEditorRange(composeBodyEl);
+  try {
+    await insertImageUrlFromPrompt(composeBodyEl, savedRange);
+  } catch (err) {
+    console.error("insert compose image url failed", err);
+    composeErrorEl.textContent = `Couldn't add image: ${err?.message ?? err}`;
   }
 });
 

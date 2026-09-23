@@ -1,4 +1,4 @@
-import { attachFontSync, fillFontSelect, attachImageBar, attachLinkBar, insertImageInEditor, insertLinkInEditor, prepareImage, sanitizeHtml, captureEditorRange, setSystemFonts } from "./richtext.js";
+import { attachFontSync, fillFontSelect, attachImageBar, attachLinkBar, insertImageInEditor, insertImageUrlFromPrompt, insertLinkInEditor, prepareImage, sanitizeHtml, captureEditorRange, setSystemFonts } from "./richtext.js";
 
 const { invoke } = window.__TAURI__.core;
 
@@ -2149,6 +2149,16 @@ signatureImageButtonEl.addEventListener("click", async () => {
   } finally {
     signatureImageButtonEl.disabled = false;
     signatureImageButtonEl.title = "Insert image";
+  }
+});
+
+document.getElementById("signature-image-url-button").addEventListener("click", async () => {
+  const savedRange = captureEditorRange(signatureBodyEl);
+  try {
+    await insertImageUrlFromPrompt(signatureBodyEl, savedRange);
+  } catch (err) {
+    console.error("insert signature image url failed", err);
+    showErrorToast(`Couldn't add image: ${err?.message ?? err}`);
   }
 });
 
