@@ -2,7 +2,8 @@
 
 Feature roadmap, in priority order:
 
-(nothing queued right now)
+1. Image button in the normal compose body — signatures already support embedded images, but the main compose editor body has no way to insert an image.
+2. Signature image from URL — signature images currently must be embedded/uploaded directly; add support for pointing a signature image at a URL instead.
 
 Done: conversation/thread view, signatures in the composer (HTML, multiple per account, with images and links), multi-select messages (Ctrl/Shift+click, no checkboxes/bar - a selected row's own action icons apply to the whole selection; Move handles cross-account selections one account at a time with a New folder... option).
 
