@@ -1,7 +1,7 @@
 use base64::Engine;
-use melib::smol::block_on;
 use melib::smtp::{SmtpAuth, SmtpConnection, SmtpSecurity, SmtpServerConf};
 use melib::utils::datetime;
+use smol::block_on;
 
 pub struct OutgoingAttachment {
     pub filename: String,
@@ -252,6 +252,7 @@ pub fn send(
             },
         },
         extensions: Default::default(),
+        trace: false,
     };
 
     let raw = build_raw(&msg, account, false);

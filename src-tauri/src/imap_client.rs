@@ -1,11 +1,11 @@
+use futures::StreamExt;
 use melib::backends::{
     prelude::*, BackendEvent, BackendEventConsumer, MailBackend, RefreshEventKind,
 };
 use melib::email::attachment_types::Text;
-use melib::futures::StreamExt;
 use melib::imap::ImapType;
-use melib::smol::block_on;
 use melib::{Address, Envelope, MessageID};
+use smol::block_on;
 use std::sync::Arc;
 
 pub struct EnvelopeRow {
@@ -107,19 +107,20 @@ fn connect_inner(
         display_name: None,
         subscribed_mailboxes: vec![],
         mailboxes: indexmap::indexmap! {},
+        contacts: indexmap::indexmap! {},
         manual_refresh: false,
         extra: indexmap::indexmap! {
-            "server_hostname".to_string() => provider.imap_host.clone(),
-            "server_username".to_string() => email.to_string(),
-            "server_password".to_string() => server_password,
-            "server_port".to_string() => provider.imap_port.to_string(),
-            "use_tls".to_string() => provider.imap_use_tls.to_string(),
-            "use_oauth2".to_string() => use_oauth2.to_string(),
+            "server_hostname".to_string() => serde_json::json!(provider.imap_host),
+            "server_username".to_string() => serde_json::json!(email),
+            "server_password".to_string() => serde_json::json!(server_password),
+            "server_port".to_string() => serde_json::json!(provider.imap_port),
+            "use_tls".to_string() => serde_json::json!(provider.imap_use_tls),
+            "use_oauth2".to_string() => serde_json::json!(use_oauth2),
             // Raised from melib's 16s default - hit real timeout errors at 16s, likely from
             // concurrent connection-pool operations (search fan-out, badge priming) taking longer.
-            "timeout".to_string() => "30".to_string(),
-            "offline_cache".to_string() => "true".to_string(),
-            "use_id".to_string() => "true".to_string(),
+            "timeout".to_string() => serde_json::json!(30),
+            "offline_cache".to_string() => serde_json::json!(true),
+            "use_id".to_string() => serde_json::json!(true),
         },
     };
 
@@ -663,7 +664,7 @@ pub fn save_draft(imap: &mut ImapType, raw: Vec<u8>) -> melib::Result<()> {
         .find(|(_, mbox)| mbox.special_usage() == SpecialUsageMailbox::Drafts)
         .map(|(hash, _)| *hash)
         .ok_or_else(|| melib::error::Error::new("Could not find a Drafts mailbox"))?;
-    block_on(imap.save(raw, drafts_hash, Some(melib::email::Flag::DRAFT))?)
+    block_on(imap.save(raw, drafts_hash, Some((melib::email::Flag::DRAFT, vec![])))?)
 }
 
 pub fn delete_message(
