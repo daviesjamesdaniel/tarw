@@ -92,6 +92,34 @@ fn is_connection_dead(err: &melib::Error) -> bool {
         || err.summary.contains("Disconnected")
 }
 
+/// Turns a melib error into the short, actionable line shown in a UI toast,
+/// and logs the full error chain (with the command it came from) to stderr so
+/// the real cause survives after the toast is gone. melib's own Display is a
+/// technical multi-part chain ("[2] Network error: ...") that says nothing
+/// about what the user can do.
+fn user_error(context: &str, err: &melib::Error) -> String {
+    eprintln!("[error:{context}] {err}");
+    if err.kind.is_authentication() {
+        "The mail server rejected the sign-in - the account may need to be re-added".to_string()
+    } else if is_unknown_mailbox(err) {
+        "That folder no longer exists on the server".to_string()
+    } else if err.kind.is_timeout() {
+        "The mail server took too long to respond".to_string()
+    } else if err.kind.is_network()
+        || err.kind.is_disconnected()
+        || err.summary.contains("Disconnected")
+    {
+        "Can't reach the mail server - check your connection".to_string()
+    } else {
+        let first_line = err.summary.lines().next().unwrap_or("").trim();
+        if first_line.is_empty() {
+            "Unexpected error (details in the log)".to_string()
+        } else {
+            first_line.chars().take(160).collect()
+        }
+    }
+}
+
 /// A torn WAL/SHM sidecar (e.g. from a hard process kill mid-write) can
 /// leave melib's sqlite header cache genuinely unreadable. The server is
 /// always the real source of truth for mail, so the safe remedy is just to
@@ -372,7 +400,7 @@ async fn fetch_mailboxes(
         let state = app.state::<AppState>();
         with_connection(&state, &account, |imap| imap_client::list_mailboxes(imap))
             .map(mailbox_infos_to_dtos)
-            .map_err(|e| e.to_string())
+            .map_err(|e| user_error("fetch_mailboxes", &e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -389,7 +417,7 @@ async fn refresh_mailboxes(
             imap_client::refresh_mailboxes(imap)
         })
         .map(mailbox_infos_to_dtos)
-        .map_err(|e| e.to_string())
+        .map_err(|e| user_error("refresh_mailboxes", &e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -427,7 +455,7 @@ async fn fetch_mailbox_messages(
             imap_client::list_mailbox(imap, mailbox_hash)
         })
         .map(|rows| rows.into_iter().map(EnvelopeDto::from).collect())
-        .map_err(|e| e.to_string())
+        .map_err(|e| user_error("fetch_mailbox_messages", &e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -546,7 +574,7 @@ async fn fetch_body(
             message_id: r.message_id,
             references: r.references,
         })
-        .map_err(|e| e.to_string())
+        .map_err(|e| user_error("fetch_body", &e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -653,7 +681,7 @@ async fn set_seen(
         with_connection(&state, &account, |imap| {
             imap_client::set_flag(imap, hash, mailbox_hash, melib::email::Flag::SEEN, value)
         })
-        .map_err(|e| e.to_string())
+        .map_err(|e| user_error("set_seen", &e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -675,7 +703,7 @@ async fn set_flagged(
         with_connection(&state, &account, |imap| {
             imap_client::set_flag(imap, hash, mailbox_hash, melib::email::Flag::FLAGGED, value)
         })
-        .map_err(|e| e.to_string())
+        .map_err(|e| user_error("set_flagged", &e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -693,7 +721,7 @@ async fn mark_all_seen(
         with_connection(&state, &account, |imap| {
             imap_client::mark_all_seen(imap, mailbox_hash)
         })
-        .map_err(|e| e.to_string())
+        .map_err(|e| user_error("mark_all_seen", &e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -711,7 +739,7 @@ async fn delete_all_messages(
         with_connection(&state, &account, |imap| {
             imap_client::delete_all_messages(imap, mailbox_hash)
         })
-        .map_err(|e| e.to_string())
+        .map_err(|e| user_error("delete_all_messages", &e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -729,7 +757,7 @@ async fn create_mailbox(
             imap_client::create_mailbox(imap, path.clone())
         })
         .map(mailbox_infos_to_dtos)
-        .map_err(|e| e.to_string());
+        .map_err(|e| user_error("create_mailbox", &e));
         if result.is_ok() {
             refresh_all_connections(&state, &account);
         }
@@ -758,7 +786,7 @@ async fn delete_mailbox(
             imap_client::delete_mailbox(imap, mailbox_hash, messages)
         })
         .map(mailbox_infos_to_dtos)
-        .map_err(|e| e.to_string());
+        .map_err(|e| user_error("delete_mailbox", &e));
         if result.is_ok() {
             refresh_all_connections(&state, &account);
         }
@@ -783,7 +811,7 @@ async fn delete_message(
         with_connection(&state, &account, |imap| {
             imap_client::delete_message(imap, hash, mailbox_hash)
         })
-        .map_err(|e| e.to_string())
+        .map_err(|e| user_error("delete_message", &e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -806,7 +834,7 @@ async fn move_message(
         with_connection(&state, &account, |imap| {
             imap_client::move_message(imap, hash, source_mailbox_hash, destination_mailbox_hash)
         })
-        .map_err(|e| e.to_string())
+        .map_err(|e| user_error("move_message", &e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1670,6 +1698,18 @@ mod connection_tests {
     fn lock_recovering_survives_a_poisoned_lock() {
         let m = poisoned_mutex();
         assert_eq!(lock_recovering(&m).len(), 3);
+    }
+
+    #[test]
+    fn user_error_maps_causes_to_short_actionable_messages() {
+        let auth = melib::Error::new("bad login").set_kind(melib::ErrorKind::Authentication);
+        assert!(user_error("t", &auth).contains("sign-in"));
+        assert!(user_error("t", &melib::Error::new("Disconnected")).contains("connection"));
+        assert!(
+            user_error("t", &melib::Error::new("Mailbox no longer exists")).contains("no longer")
+        );
+        let multiline = melib::Error::new("first line\nsecond line");
+        assert_eq!(user_error("t", &multiline), "first line");
     }
 
     #[test]
