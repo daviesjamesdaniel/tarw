@@ -74,7 +74,7 @@ pub fn connect(
 ) -> melib::Result<Box<ImapType>> {
     use crate::providers::AuthMethod;
     let (server_password, use_oauth2) = match provider.auth_method {
-        AuthMethod::OAuth2 => (crate::oauth::get_xoauth2_password(email, provider)?, true),
+        AuthMethod::OAuth2 => (crate::oauth::get_access_token(email, provider)?, true),
         AuthMethod::Password => (crate::password_auth::get_password(email)?, false),
     };
     connect_inner(email, provider, server_password, use_oauth2)

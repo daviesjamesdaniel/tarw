@@ -324,7 +324,10 @@ mod tests {
     }
 }
 
-pub fn get_xoauth2_password(
+/// The bare access token. melib's IMAP backend builds the SASL string itself
+/// for whichever of OAUTHBEARER/XOAUTH2 the server offers, so it needs this
+/// rather than a pre-encoded XOAUTH2 string.
+pub fn get_access_token(
     email: &str,
     provider: &crate::providers::ProviderConfig,
 ) -> melib::Result<String> {
@@ -336,11 +339,18 @@ pub fn get_xoauth2_password(
     })?;
 
     let refreshed = try_refresh(email, cfg)?;
-    let access_token = match refreshed {
-        Some(token) => token,
-        None => interactive_login(email, cfg)?,
-    };
+    match refreshed {
+        Some(token) => Ok(token),
+        None => interactive_login(email, cfg),
+    }
+}
 
+/// Base64-encoded XOAUTH2 string, which melib's SMTP client sends as-is.
+pub fn get_xoauth2_password(
+    email: &str,
+    provider: &crate::providers::ProviderConfig,
+) -> melib::Result<String> {
+    let access_token = get_access_token(email, provider)?;
     let raw = format!("user={email}\x01auth=Bearer {access_token}\x01\x01");
     Ok(base64::engine::general_purpose::STANDARD.encode(raw))
 }
